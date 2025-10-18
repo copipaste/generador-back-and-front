@@ -24,7 +24,7 @@ import {
   Side,
   XYWH,
 } from "~/types";
-import type { Anchor, EntityLayer, RelationLayer } from "~/types";
+import type { Anchor, EntityLayer, RelationLayer, RelationType, ProjectConfig } from "~/types";
 import { nanoid } from "nanoid";
 import { LiveObject } from "@liveblocks/client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -35,14 +35,15 @@ import SelectionTools from "./SelectionTools";
 import Sidebars from "../sidebars/Sidebars";
 import MultiplayerGuides from "./MultiplayerGuides";
 import { User } from "@prisma/client";
-import { useAngularProjectGenerator } from "../angular-generator/useAngularProjectGenerator";
 
 import { useSpringBootGenerator } from "../spring-generator/useSpringBootGenerator";
 import { usePostmanCollectionGenerator } from "../spring-generator/usePostmanCollectionGenerator";
+import { usePostgreSQLGenerator } from "../spring-generator/usePostgreSQLGenerator";
 
 // dentro del bloque de botones de la barra superior en Canvas.tsx
 import  useNlToErd  from "../ai/useNlToErd"; // 👈 importa el hook (ajusta ruta si difiere)
 import NlToErdModal from "~/components/ai/NlToErdModal";
+import ProjectConfigModal from "../settings/ProjectConfigModal";
 
 
 import { useClassDiagramToFormsGenerator } from "~/hooks/useClassDiagramToFormsGenerator";
@@ -74,11 +75,13 @@ const isLinking = (
 ): s is CanvasState & {
   fromEntityId: string;
   fromAnchor: "L" | "R" | "T" | "B";
+  relationType: RelationType;
   current?: Point;
 } =>
   s.mode === CanvasMode.Linking &&
   "fromEntityId" in s &&
-  "fromAnchor" in s;
+  "fromAnchor" in s &&
+  "relationType" in s;
 
 /* =========================================================
  * Utils locales
@@ -115,11 +118,9 @@ export default function Canvas({
   roomId: string;
   othersWithAccessToRoom: User[];
 }) {
-  const generateAngularProject = useAngularProjectGenerator(roomName);
-
-  //!yo añadi esta línea -----------------------------------------
   const generateSpringBoot = useSpringBootGenerator(roomName);
   const generatePostman = usePostmanCollectionGenerator(roomName);
+  const generatePostgreSQL = usePostgreSQLGenerator(roomName);
   const { fromDescription } = useNlToErd(); 
 
 
@@ -130,6 +131,8 @@ export default function Canvas({
 
   const [canvasState, setState] = useState<CanvasState>({ mode: CanvasMode.None });
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
+  const [selectedRelationType, setSelectedRelationType] = useState<RelationType>("association");
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
 
   const history = useHistory();
   const canUndo = useCanUndo();
@@ -138,6 +141,16 @@ export default function Canvas({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const classDiagramFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Project config from storage
+  const projectConfig = useStorage((root) => root.projectConfig);
+
+  // Save project config mutation
+  const saveProjectConfig = useMutation(
+    ({ storage }, config: ProjectConfig) => {
+      storage.set("projectConfig", new LiveObject(config));
+    },
+    [],
+  );
 
   //!---------------------------------------------------------
     async function handleDescribeToErd() {
@@ -315,9 +328,14 @@ export default function Canvas({
    * =======================================================*/
   const startLinking = useCallback(
     (entityId: string, anchor: "L" | "R" | "T" | "B") => {
-      setState({ mode: CanvasMode.Linking, fromEntityId: entityId, fromAnchor: anchor });
+      setState({
+        mode: CanvasMode.Linking,
+        fromEntityId: entityId,
+        fromAnchor: anchor,
+        relationType: selectedRelationType
+      });
     },
-    [],
+    [selectedRelationType],
   );
 
   const onLayerPointerDown = useMutation(
@@ -334,20 +352,20 @@ export default function Canvas({
         const isEntity = (l: any) => l?.get?.("type") === LayerType.Entity;
 
         if (isEntity(src) && isEntity(dst)) {
-          const id = nanoid();
-          layers.set(
-            id,
-            new LiveObject({
-              type: LayerType.Relation,
-              sourceId: canvasState.fromEntityId,
-              targetId: layerId,
-              sourceCard: "ONE",
-              targetCard: "ONE",
-              owningSide: "target",
-              opacity: 100,
-            } as RelationLayer),
-          );
-          storage.get("layerIds").push(id);
+          const relationId = nanoid();
+          const newRelation: RelationLayer = {
+            type: LayerType.Relation,
+            sourceId: canvasState.fromEntityId,
+            targetId: layerId,
+            relationType: canvasState.relationType,
+            sourceCard: "ONE",
+            targetCard: "ONE",
+            owningSide: "target",
+            opacity: 100,
+          };
+
+          layers.set(relationId, new LiveObject(newRelation));
+          storage.get("layerIds").push(relationId);
 
           setState({ mode: CanvasMode.None });
         }
@@ -617,71 +635,122 @@ const isLinkingState = (s: CanvasState): s is LinkingState =>
         />
 
         {/* barra superior */}
-        <div className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 transform flex-wrap items-center justify-center gap-2 rounded-xl bg-white/90 px-5 py-3 shadow-lg backdrop-blur-md">
-          <button
-            onClick={exportToJSON}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white shadow hover:bg-blue-700"
-          >
-            Exportar a JSON
-          </button>
+        <div className="absolute left-1/2 top-6 z-50 flex -translate-x-1/2 transform flex-wrap items-center justify-center gap-3 rounded-2xl bg-white px-6 py-3.5 shadow-xl border border-gray-200">
 
-          <label className="relative cursor-pointer rounded-md bg-green-600 px-4 py-2 text-sm text-white shadow hover:bg-green-700">
-            Importar JSON
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleFileUpload}
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
-          </label>
+          {/* Grupo: Archivo */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportToJSON}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-blue-700 hover:shadow-md active:scale-95"
+              title="Exportar diagrama a JSON (Ctrl+S)"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Exportar JSON
+            </button>
 
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-green-700 hover:shadow-md active:scale-95">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Importar JSON
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          {/* Separador */}
+          <div className="h-8 w-px bg-gray-300"></div>
+
+          {/* Grupo: AI */}
           <NlToErdModal
             defaultValue="Una Persona tiene muchas Casas y cada Casa pertenece a un Condominio"
             trigger={
               <button
                 type="button"
-                className="rounded-md bg-purple-600 px-4 py-2 text-sm text-white shadow hover:bg-purple-700"
-                title="Describe y te dibujo (NL → ERD)"
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:from-purple-700 hover:to-pink-700 hover:shadow-md active:scale-95"
+                title="Describe tu diagrama en lenguaje natural"
               >
-                ✨ Describe y te dibujo
+                <span className="text-base">✨</span>
+                Generar con IA
               </button>
             }
           />
 
+          {/* Separador */}
+          <div className="h-8 w-px bg-gray-300"></div>
 
+          {/* Grupo: Generadores */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generateSpringBoot}
+              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 hover:shadow-md active:scale-95"
+              title="Generar proyecto Spring Boot"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+              Spring Boot
+            </button>
+
+            <button
+              onClick={generatePostman}
+              className="flex items-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-orange-700 hover:shadow-md active:scale-95"
+              title="Exportar colección de Postman"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              Postman
+            </button>
+
+            <button
+              onClick={generatePostgreSQL}
+              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-indigo-700 hover:shadow-md active:scale-95"
+              title="Generar script PostgreSQL"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+              PostgreSQL
+            </button>
+          </div>
+
+          {/* Separador */}
+          <div className="h-8 w-px bg-gray-300"></div>
+
+          {/* Grupo: Configuración */}
           <button
-          onClick={generateSpringBoot}
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm text-white shadow hover:bg-emerald-700"
-        >
-          Generar Spring
-        </button>
-
-        <button
-          onClick={generatePostman}
-          className="rounded-md bg-orange-600 px-4 py-2 text-sm text-white shadow hover:bg-orange-700
-         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2"
-        >
-          Exportar Postman
-        </button>
-
-      
-        {/* <button
-          onClick={handleDescribeToErd}
-          className="rounded-md bg-purple-600 px-4 py-2 text-sm text-white shadow hover:bg-purple-700"
-        >
-          Describe → ERD
-        </button> */}
-
-
-
- 
+            onClick={() => setIsConfigModalOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-gray-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
+            title="Configuración del proyecto"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Configuración
+          </button>
         </div>
+
+        {/* Project Config Modal */}
+        <ProjectConfigModal
+          isOpen={isConfigModalOpen}
+          onClose={() => setIsConfigModalOpen(false)}
+          onSave={saveProjectConfig}
+          initialConfig={projectConfig ?? undefined}
+        />
 
         {/* lienzo */}
         <div
-          style={{ backgroundColor: roomColor ? colorToCss(roomColor) : "#1e1e1e" }}
-          className="h-full w-full touch-none"
+          style={{ backgroundColor: roomColor ? colorToCss(roomColor) : "#F9FAFB" }}
+          className="h-full w-full touch-none bg-[radial-gradient(#E5E7EB_1px,transparent_1px)] [background-size:20px_20px]"
         >
           <SelectionTools camera={camera} canvasMode={canvasState.mode} />
           <svg
@@ -739,6 +808,8 @@ const isLinkingState = (s: CanvasState): s is LinkingState =>
       <ToolsBar
         canvasState={canvasState}
         setCanvasState={(s) => setState(s)}
+        selectedRelationType={selectedRelationType}
+        setSelectedRelationType={setSelectedRelationType}
         zoomIn={() => setCamera((c) => ({ ...c, zoom: c.zoom + 0.1 }))}
         zoomOut={() => setCamera((c) => ({ ...c, zoom: c.zoom - 0.1 }))}
         canZoomIn={camera.zoom < 2}

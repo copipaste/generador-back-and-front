@@ -39,6 +39,15 @@ export type DBPrimitive =
 
 export type Cardinality = "ONE" | "MANY";
 
+// Tipos de relaciones UML 3.5
+export type RelationType =
+  | "association"      // Asociación simple (línea)
+  | "aggregation"      // Agregación (diamante vacío)
+  | "composition"      // Composición (diamante lleno)
+  | "generalization"   // Generalización/Herencia (triángulo vacío)
+  | "realization"      // Realización/Implementación (triángulo vacío, línea punteada)
+  | "dependency";      // Dependencia (flecha, línea punteada)
+
 export type DBAttribute = {
   id: string;
   name: string;
@@ -62,6 +71,9 @@ export type RelationLayer = {
   type: LayerType.Relation;
   sourceId: string;
   targetId: string;
+  relationType: RelationType;  // Tipo de relación UML
+  relationName?: string;       // Nombre de la relación (ej: "compras", "clientes")
+  inverseName?: string;        // Nombre inverso (ej: "compradoPor", "perteneceA")
   sourceCard: Cardinality;
   targetCard: Cardinality;
   owningSide?: "source" | "target";
@@ -70,6 +82,37 @@ export type RelationLayer = {
 
 export type Layer = EntityLayer | RelationLayer;
 
+// Configuración del proyecto para generación de código
+export type ProjectConfig = {
+  // Información básica
+  projectName: string;          // Nombre del proyecto (ej: "mi-proyecto")
+  description?: string;         // Descripción del proyecto
+
+  // Configuración Java/Spring Boot
+  groupId: string;              // com.ejemplo.proyecto
+  artifactId: string;           // mi-proyecto
+  version: string;              // 1.0.0
+  javaVersion: string;          // 17, 21
+  springBootVersion: string;    // 3.2.0
+  packaging: "jar" | "war";     // Tipo de empaquetado
+
+  // Base de datos
+  database: "mysql" | "postgresql" | "h2" | "oracle";
+  databaseName?: string;        // Nombre de la base de datos
+  databaseHost?: string;        // Host de la BD (default: localhost)
+  databasePort?: number;        // Puerto de la BD (default: 5432 para PostgreSQL)
+  databaseUsername?: string;    // Usuario de la BD
+  databasePassword?: string;    // Contraseña de la BD
+
+  // Servidor
+  serverPort: number;           // 8080
+  contextPath?: string;         // /api
+
+  // Flutter (opcional)
+  flutterEnabled: boolean;
+  flutterVersion?: string;      // 3.16.0
+  flutterPackageName?: string;  // com.ejemplo.proyecto_app
+};
 
 
 export enum Side { Top = 1, Bottom = 2, Left = 4, Right = 8 }
@@ -89,6 +132,7 @@ export type CanvasState =
       mode: CanvasMode.Linking;
       fromEntityId: string;
       fromAnchor: Anchor;
+      relationType: RelationType; // Tipo de relación que se está creando
       /** punto actual del cursor mientras se dibuja la relación */
-      current?: Point; // <-- añadir esto
+      current?: Point;
     };

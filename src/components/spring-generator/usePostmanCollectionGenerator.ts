@@ -1,9 +1,10 @@
-// src/components/postman-generator/usePostmanCollectionGenerator.ts
+// src/components/spring-generator/usePostmanCollectionGenerator.ts
 "use client";
 
 import { useStorage } from "@liveblocks/react";
 import { LayerType } from "~/types";
 import type { EntityLayer, RelationLayer } from "~/types";
+import { generateRelationNames } from "~/utils/relationNameGenerator";
 
 /* ---------- helpers ---------- */
 type Attr = { id: string; name: string; type: string; required?: boolean; pk?: boolean };
@@ -45,44 +46,6 @@ export function usePostmanCollectionGenerator(projectName: string) {
     return { entities, relations };
   };
 
-  /** Devuelve, para cada ENTIDAD HIJA (lado MANY), el listado de FK { fieldName, other(parent), otherIdName } */
-  const buildManyToOneMap = (entities: PlainEntity[], relations: PlainRelation[]) => {
-    const byId = new Map(entities.map((e) => [e.idInCanvas, e]));
-    const map: Record<
-      string,
-      Array<{ fieldName: string; other: PlainEntity; otherIdName: string }>
-    > = {};
-
-    for (const rel of relations) {
-      const src = byId.get(rel.sourceId);
-      const dst = byId.get(rel.targetId);
-      if (!src || !dst) continue;
-
-      const srcMany = rel.sourceCard === "MANY";
-      const dstMany = rel.targetCard === "MANY";
-
-      const srcIdName =
-        (src.attributes as Attr[] | undefined)?.find((a) => a.pk)?.name || "id";
-      const dstIdName =
-        (dst.attributes as Attr[] | undefined)?.find((a) => a.pk)?.name || "id";
-
-      // child = lado MANY  |  parent = lado ONE
-      if (srcMany && !dstMany) {
-        const child = src;
-        const parent = dst;
-        const fieldName = camel(parent.name.replace(/[^A-Za-z0-9]/g, "") || "parent");
-        (map[child.idInCanvas] ||= []).push({ fieldName, other: parent, otherIdName: dstIdName });
-      }
-      if (dstMany && !srcMany) {
-        const child = dst;
-        const parent = src;
-        const fieldName = camel(parent.name.replace(/[^A-Za-z0-9]/g, "") || "parent");
-        (map[child.idInCanvas] ||= []).push({ fieldName, other: parent, otherIdName: srcIdName });
-      }
-    }
-    return map;
-  };
-
   const generatePostman = async () => {
     const { entities, relations } = getEntitiesAndRelations();
     if (!entities.length) {
@@ -90,43 +53,17 @@ export function usePostmanCollectionGenerator(projectName: string) {
       return;
     }
 
-    const manyToOneByEntity = buildManyToOneMap(entities, relations);
-
-    // Para endpoints /api/<child>/<parent>/{parentId}
-    const byId = new Map(entities.map((e) => [e.idInCanvas, e]));
-    const findersByChild: Record<
-      string,
-      Array<{ parentField: string; parentIdName: string }>
-    > = {};
+    // Detectar relaciones de herencia
+    const inheritanceMap = new Map<string, { parentId: string; relation: PlainRelation }>();
     for (const rel of relations) {
-      const src = byId.get(rel.sourceId);
-      const dst = byId.get(rel.targetId);
-      if (!src || !dst) continue;
-
-      const srcMany = rel.sourceCard === "MANY";
-      const dstMany = rel.targetCard === "MANY";
-
-      const srcIdName =
-        (src.attributes as Attr[] | undefined)?.find((a) => a.pk)?.name || "id";
-      const dstIdName =
-        (dst.attributes as Attr[] | undefined)?.find((a) => a.pk)?.name || "id";
-
-      const srcField = camel(src.name.replace(/[^A-Za-z0-9]/g, "") || "source");
-      const dstField = camel(dst.name.replace(/[^A-Za-z0-9]/g, "") || "target");
-
-      if (srcMany && !dstMany) {
-        (findersByChild[src.idInCanvas] ||= []).push({
-          parentField: dstField,
-          parentIdName: dstIdName,
-        });
-      }
-      if (dstMany && !srcMany) {
-        (findersByChild[dst.idInCanvas] ||= []).push({
-          parentField: srcField,
-          parentIdName: srcIdName,
-        });
+      if (rel.relationType === "generalization") {
+        // source = hijo/subclase, target = padre/superclase
+        inheritanceMap.set(rel.sourceId, { parentId: rel.targetId, relation: rel });
       }
     }
+
+    // Mapa de entidades por ID
+    const byId = new Map(entities.map((e) => [e.idInCanvas, e]));
 
     const baseUrlVar = "{{baseUrl}}";
     const collection: any = {
@@ -134,7 +71,7 @@ export function usePostmanCollectionGenerator(projectName: string) {
         name: `API ${projectName}`,
         schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
       },
-      variable: [{ key: "baseUrl", value: "http://localhost:8080" }],
+      variable: [{ key: "baseUrl", value: "http://localhost:8080/api" }],
       item: [] as any[],
     };
 
@@ -166,25 +103,80 @@ export function usePostmanCollectionGenerator(projectName: string) {
     for (const ent of entities) {
       const className = ent.name.replace(/[^A-Za-z0-9]/g, "") || "Entity";
       const varName = camel(className);
-      const basePath = `/api/${varName}`;
+      // El backend usa @RequestMapping("/{entity}") en controllers sin prefijo /api
+      // Solo si hay contextPath configurado se agrega
+      const basePath = `/${varName}`;
 
       const attrs = (ent.attributes || []) as Attr[];
-      const idAttr = attrs.find((a) => a.pk);
-      const idName = (idAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
 
-      // Body ejemplo
+      // Verificar si es subclase
+      const inheritanceInfo = inheritanceMap.get(ent.idInCanvas);
+      const isSubclass = !!inheritanceInfo;
+
+      // Body ejemplo (incluir campos heredados si es subclase)
       const bodyExample: Record<string, any> = {};
+
+      // Si es subclase, agregar campos de la superclase
+      if (isSubclass && inheritanceInfo) {
+        const parentEntity = entities.find(e => e.idInCanvas === inheritanceInfo.parentId);
+        if (parentEntity) {
+          const parentAttrs = (parentEntity.attributes || []) as Attr[];
+          for (const a of parentAttrs) {
+            if (a.pk) continue; // No incluir ID del padre
+            const field = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+            bodyExample[field] = sampleForType(field, a.type || "string");
+          }
+        }
+      }
+
+      // Agregar campos propios
       for (const a of attrs) {
         if (a.pk) continue;
         const field = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
         bodyExample[field] = sampleForType(field, a.type || "string");
       }
 
-      // ⬅️ Aquí se agregan las FKs MANY→ONE como objeto { "<idPadre>": 1 }
-      const m2os = manyToOneByEntity[ent.idInCanvas] || [];
-      for (const m of m2os) {
-        const idField = (m.otherIdName || "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
-        bodyExample[m.fieldName] = { [idField]: 1 };
+      // ⬅️ Agregar IDs de relaciones MANY→ONE usando generateRelationNames
+      const rels = relations.filter(
+        rel => (rel.sourceId === ent.idInCanvas || rel.targetId === ent.idInCanvas)
+            && rel.relationType !== "generalization"
+      );
+
+      for (const rel of rels) {
+        const src = byId.get(rel.sourceId);
+        const dst = byId.get(rel.targetId);
+        if (!src || !dst) continue;
+
+        const srcMany = rel.sourceCard === "MANY";
+        const dstMany = rel.targetCard === "MANY";
+
+        // Solo agregar si es una relación ManyToOne desde esta entidad
+        const isSourceEntity = rel.sourceId === ent.idInCanvas;
+        const thisHasManyToOne =
+          (isSourceEntity && srcMany && !dstMany) ||
+          (!isSourceEntity && dstMany && !srcMany);
+
+        if (thisHasManyToOne) {
+          const other = isSourceEntity ? dst : src;
+          const sourceEntity = isSourceEntity ? ent : other;
+          const targetEntity = isSourceEntity ? other : ent;
+
+          const { fieldName, inverseName } = generateRelationNames(
+            rel.relationType,
+            sourceEntity,
+            targetEntity,
+            rel.sourceCard,
+            rel.targetCard
+          );
+
+          const currentFieldName = isSourceEntity ? fieldName : inverseName;
+          const otherIdAttr = (other.attributes as Attr[] | undefined)?.find((a) => a.pk);
+          const otherIdName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+
+          // IMPORTANTE: En DTOs, el campo es "{fieldName}{IdName}" con solo el valor del ID
+          const dtoFieldName = `${currentFieldName}${otherIdName.charAt(0).toUpperCase() + otherIdName.slice(1)}`;
+          bodyExample[dtoFieldName] = 1;  // Solo el ID, no un objeto anidado
+        }
       }
 
       const folder = { name: className, item: [] as any[] };
@@ -195,15 +187,45 @@ export function usePostmanCollectionGenerator(projectName: string) {
       folder.item.push(makeRequest(`PUT ${className} - actualizar`, "PUT", `${basePath}/:id`, bodyExample));
       folder.item.push(makeRequest(`DELETE ${className} - eliminar`, "DELETE", `${basePath}/:id`));
 
-      const finders = findersByChild[ent.idInCanvas] || [];
-      for (const f of finders) {
-        folder.item.push(
-          makeRequest(
-            `GET ${className} - por ${f.parentField}Id`,
-            "GET",
-            `${basePath}/${f.parentField}/:parentId`,
-          ),
-        );
+      // Agregar endpoints de búsqueda por relaciones ManyToOne usando generateRelationNames
+      for (const rel of rels) {
+        const src = byId.get(rel.sourceId);
+        const dst = byId.get(rel.targetId);
+        if (!src || !dst) continue;
+
+        const srcMany = rel.sourceCard === "MANY";
+        const dstMany = rel.targetCard === "MANY";
+
+        const isSourceEntity = rel.sourceId === ent.idInCanvas;
+        const thisHasManyToOne =
+          (isSourceEntity && srcMany && !dstMany) ||
+          (!isSourceEntity && dstMany && !srcMany);
+
+        if (thisHasManyToOne) {
+          const other = isSourceEntity ? dst : src;
+          const sourceEntity = isSourceEntity ? ent : other;
+          const targetEntity = isSourceEntity ? other : ent;
+
+          const { fieldName, inverseName } = generateRelationNames(
+            rel.relationType,
+            sourceEntity,
+            targetEntity,
+            rel.sourceCard,
+            rel.targetCard
+          );
+
+          const currentFieldName = isSourceEntity ? fieldName : inverseName;
+          const otherIdAttr = (other.attributes as Attr[] | undefined)?.find((a) => a.pk);
+          const otherIdName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+
+          folder.item.push(
+            makeRequest(
+              `GET ${className} - por ${currentFieldName}`,
+              "GET",
+              `${basePath}/${currentFieldName}/:${otherIdName}`,
+            ),
+          );
+        }
       }
 
       collection.item.push(folder);

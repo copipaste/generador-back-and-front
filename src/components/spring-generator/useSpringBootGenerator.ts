@@ -4,26 +4,8 @@
 import JSZip from "jszip";
 import { useStorage } from "@liveblocks/react";
 import { LayerType } from "~/types";
-import type { EntityLayer, RelationLayer } from "~/types";
-
-/** Mapea tipos simples -> Java */
-const toJavaType = (t: string) => {
-  switch ((t || "").toLowerCase()) {
-    case "int":
-      return "Integer";
-    case "long":
-      return "Long";
-    case "double":
-      return "Double";
-    case "boolean":
-      return "Boolean";
-    case "date":
-      return "LocalDate";
-    case "string":
-    default:
-      return "String";
-  }
-};
+import type { EntityLayer, RelationLayer, ProjectConfig } from "~/types";
+import { generateRelationNames, toJavaType, toTableName, toColumnName } from "~/utils/relationNameGenerator";
 
 type Attr = { id: string; name: string; type: string; required?: boolean; pk?: boolean };
 
@@ -33,6 +15,7 @@ type PlainRelation = RelationLayer & { idInCanvas: string };
 export function useSpringBootGenerator(projectName: string) {
   const layerIds = useStorage((root) => root.layerIds) || [];
   const layersMap = useStorage((root) => root.layers);
+  const projectConfig = useStorage((root) => root.projectConfig);
 
   const readRaw = (id: string): any | null => {
     const live: any = layersMap?.get(id);
@@ -65,29 +48,40 @@ export function useSpringBootGenerator(projectName: string) {
       return;
     }
 
+    // Usar ProjectConfig o valores por defecto
+    const config = projectConfig?.toImmutable?.() ?? projectConfig;
+    const basePkg = config?.groupId ?? "com.example.demo";
+    const artifactId = config?.artifactId ?? projectName.replace(/\s+/g, "-").toLowerCase();
+    const version = config?.version ?? "1.0.0";
+    const javaVersion = config?.javaVersion ?? "17";
+    const springBootVersion = config?.springBootVersion ?? "3.2.0";
+    const database = config?.database ?? "h2";
+    const databaseName = config?.databaseName ?? "testdb";
+    const serverPort = config?.serverPort ?? 8080;
+    const contextPath = config?.contextPath ?? "";
+
     const zip = new JSZip();
 
     // ── estructura base del proyecto
-    const basePkg = "com.example.demo";
     const pkgPath = basePkg.replace(/\./g, "/");
-    const root = `spring-${projectName.replace(/\s+/g, "-").toLowerCase()}`;
+    const root = `spring-${artifactId}`;
 
     // pom.xml
     zip.file(
       `${root}/pom.xml`,
       `<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" 
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>${basePkg}</groupId>
-  <artifactId>${projectName.replace(/\s+/g, "-").toLowerCase()}</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
-  <name>${projectName}</name>
-  <description>Generado desde el lienzo</description>
+  <artifactId>${artifactId}</artifactId>
+  <version>${version}</version>
+  <name>${config?.projectName ?? projectName}</name>
+  <description>${config?.description ?? "Generado desde diagrama UML"}</description>
   <properties>
-    <java.version>17</java.version>
-    <spring-boot.version>3.3.4</spring-boot.version>
+    <java.version>${javaVersion}</java.version>
+    <spring-boot.version>${springBootVersion}</spring-boot.version>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -109,11 +103,33 @@ export function useSpringBootGenerator(projectName: string) {
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-jpa</artifactId>
     </dependency>
-    <dependency>
+    ${
+      database === "h2"
+        ? `<dependency>
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>
       <scope>runtime</scope>
-    </dependency>
+    </dependency>`
+        : database === "mysql"
+        ? `<dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>`
+        : database === "postgresql"
+        ? `<dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>`
+        : database === "oracle"
+        ? `<dependency>
+      <groupId>com.oracle.database.jdbc</groupId>
+      <artifactId>ojdbc8</artifactId>
+      <scope>runtime</scope>
+    </dependency>`
+        : ""
+    }
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
@@ -124,10 +140,12 @@ export function useSpringBootGenerator(projectName: string) {
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <version>\${spring-boot.version}</version>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
         <configuration>
             <parameters>true</parameters>
         </configuration>
@@ -137,13 +155,43 @@ export function useSpringBootGenerator(projectName: string) {
 </project>`
     );
 
-    // application.properties
+    // application.properties con credenciales configurables
+    const dbHost = config?.databaseHost ?? "localhost";
+    const dbPort = config?.databasePort ?? (database === "postgresql" ? 5432 : database === "mysql" ? 3306 : database === "oracle" ? 1521 : 3306);
+    const dbUser = config?.databaseUsername ?? (database === "h2" ? "sa" : "postgres");
+    const dbPassword = config?.databasePassword ?? (database === "h2" ? "" : "password");
+
+    const datasourceUrl =
+      database === "h2"
+        ? `jdbc:h2:mem:${databaseName}`
+        : database === "mysql"
+        ? `jdbc:mysql://${dbHost}:${dbPort}/${databaseName}`
+        : database === "postgresql"
+        ? `jdbc:postgresql://${dbHost}:${dbPort}/${databaseName}`
+        : database === "oracle"
+        ? `jdbc:oracle:thin:@${dbHost}:${dbPort}:${databaseName}`
+        : `jdbc:h2:mem:${databaseName}`;
+
     zip.file(
       `${root}/src/main/resources/application.properties`,
-      `spring.datasource.url=jdbc:h2:mem:testdb
-spring.h2.console.enabled=true
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true`
+      `# Server Configuration
+server.port=${serverPort}${contextPath ? `\nserver.servlet.context-path=${contextPath}` : ""}
+
+# Database Configuration
+spring.datasource.url=${datasourceUrl}
+spring.datasource.username=${dbUser}
+spring.datasource.password=${dbPassword}
+${database === "h2" ? "spring.h2.console.enabled=true" : ""}
+
+# JPA Configuration
+spring.jpa.hibernate.ddl-auto=none
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+spring.jpa.properties.hibernate.dialect=${database === "postgresql" ? "org.hibernate.dialect.PostgreSQLDialect" : database === "mysql" ? "org.hibernate.dialect.MySQLDialect" : "org.hibernate.dialect.H2Dialect"}
+
+# Logging
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.type.descriptor.sql.BasicBinder=TRACE`
     );
 
     // Application
@@ -164,11 +212,22 @@ public class DemoApplication {
 
     // ── directorios por capa
     const modelDir = `${root}/src/main/java/${pkgPath}/model`;
+    const dtoDir = `${root}/src/main/java/${pkgPath}/dto`;
+    const mapperDir = `${root}/src/main/java/${pkgPath}/mapper`;
     const repoDir = `${root}/src/main/java/${pkgPath}/repository`;
     const svcDir = `${root}/src/main/java/${pkgPath}/service`;
     const ctrlDir = `${root}/src/main/java/${pkgPath}/controller`;
 
     const byId = new Map(entities.map((e) => [e.idInCanvas, e]));
+
+    // Detectar relaciones de herencia
+    const inheritanceMap = new Map<string, { parentId: string; relation: PlainRelation }>();
+    for (const rel of relations) {
+      if (rel.relationType === "generalization") {
+        // source = hijo/subclase, target = padre/superclase
+        inheritanceMap.set(rel.sourceId, { parentId: rel.targetId, relation: rel });
+      }
+    }
 
     // Mapa relaciones por entidad
     const relsByEntity: Record<
@@ -179,6 +238,7 @@ public class DemoApplication {
         dstMany: boolean;
         owningSide: "source" | "target";
         isSource: boolean;
+        relation: PlainRelation;
       }>
     > = {};
 
@@ -198,6 +258,7 @@ public class DemoApplication {
         dstMany,
         owningSide: owning,
         isSource: true,
+        relation: rel,
       });
       (relsByEntity[dst.idInCanvas] ||= []).push({
         other: src,
@@ -205,6 +266,7 @@ public class DemoApplication {
         dstMany,
         owningSide: owning,
         isSource: false,
+        relation: rel,
       });
     }
 
@@ -217,17 +279,47 @@ public class DemoApplication {
       const idName = (idAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
       const idTypeJava = toJavaType(idAttr?.type ?? "Long");
 
+      // Verificar si es subclase o superclase
+      const inheritanceInfo = inheritanceMap.get(ent.idInCanvas);
+      const isSubclass = !!inheritanceInfo;
+      const isSuperclass = Array.from(inheritanceMap.values()).some(
+        info => info.parentId === ent.idInCanvas
+      );
+
       // ===== MODEL =====
-      let fields = `  @Id
+      let fields = "";
+      const tableName = toTableName(ent.name);
+      let classAnnotations = `@Entity\n@Table(name = "${tableName}")\n`;
+      let extendsClause = "";
+
+      if (isSubclass) {
+        // Esta es una subclase - no genera ID, lo hereda
+        const parentEntity = byId.get(inheritanceInfo.parentId);
+        if (parentEntity) {
+          const parentClassName = parentEntity.name.replace(/[^A-Za-z0-9]/g, "") || "Entity";
+          extendsClause = ` extends ${parentClassName}`;
+          // No generamos el ID aquí, se hereda del padre
+        }
+      } else if (isSuperclass) {
+        // Esta es una superclase - ID protected para que hereden las subclases
+        classAnnotations += "@Inheritance(strategy = InheritanceType.JOINED)\n";
+        fields = `  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  protected ${idTypeJava} ${idName};\n`;
+      } else {
+        // Clase normal
+        fields = `  @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private ${idTypeJava} ${idName};\n`;
+      }
 
-      // Atributos simples
+      // Atributos simples (protected si es superclase, private si no)
+      const fieldVisibility = isSuperclass ? "protected" : "private";
       for (const a of attrs) {
         if (a.pk) continue;
         const j = toJavaType(a.type ?? "String");
         const n = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
-        fields += `  private ${j} ${n};\n`;
+        fields += `  ${fieldVisibility} ${j} ${n};\n`;
       }
 
       // Relaciones y acceso extra
@@ -236,56 +328,158 @@ public class DemoApplication {
       const manyToOneFinders: Array<{
         fieldName: string;
         targetIdType: string;
+        targetIdFieldName: string;
       }> = [];
 
       for (const r of rels) {
         const otherName = r.other.name.replace(/[^A-Za-z0-9]/g, "") || "Other";
-        const otherVar = otherName.charAt(0).toLowerCase() + otherName.slice(1);
+        const relation = r.relation;
 
-        // MANY -> ONE  (este lado tiene @ManyToOne)
+        // Saltar relaciones de herencia (ya se manejan con extends)
+        if (relation.relationType === "generalization") {
+          continue;
+        }
+
+        const isSourceEntity = relation.sourceId === ent.idInCanvas;
+        const sourceEntity = isSourceEntity ? ent : r.other;
+        const targetEntity = isSourceEntity ? r.other : ent;
+
+        const { fieldName, inverseName } = generateRelationNames(
+          relation.relationType,
+          sourceEntity,
+          targetEntity,
+          relation.sourceCard,
+          relation.targetCard
+        );
+
+        // Determinar qué nombre usar en esta entidad
+        const currentFieldName = isSourceEntity ? fieldName : inverseName;
+        const otherFieldName = isSourceEntity ? inverseName : fieldName;
+
+        // Determinar el tipo de relación por cardinalidad
         const thisHasManyToOne =
           (r.isSource && r.srcMany && !r.dstMany) ||
           (!r.isSource && r.dstMany && !r.srcMany);
 
-        // ONE -> MANY  (este lado tiene @OneToMany)
         const thisHasOneToMany =
           (r.isSource && !r.srcMany && r.dstMany) ||
           (!r.isSource && !r.dstMany && r.srcMany);
 
-        // nombres de referencia JSON estables: "one-many"
-        const oneVar = thisHasOneToMany ? varName : otherVar;
-        const manyVar = thisHasOneToMany ? otherVar : varName;
-        const pairName = `${oneVar}-${manyVar}`;
+        const thisIsOneToOne = !r.srcMany && !r.dstMany;
+        const isManyToMany = r.srcMany && r.dstMany;
 
-        if (thisHasManyToOne) {
-          // JoinColumn se basa en el lado "one" (otherVar aquí)
-          fields += `
-  @com.fasterxml.jackson.annotation.JsonBackReference("${pairName}")
-  @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "${otherVar}_id")
-  private ${otherName} ${otherVar};\n`;
+        // Determinar cascade según tipo UML y tipo de relación JPA
+        let cascadeForOneToMany = "";
+        let cascadeForManyToOne = "";
+        let cascadeForOneToOne = "";
+
+        if (relation.relationType === "composition") {
+          // Composición: CASCADE ALL con orphanRemoval (solo en OneToMany/OneToOne)
+          cascadeForOneToMany = "cascade = CascadeType.ALL, orphanRemoval = true";
+          cascadeForOneToOne = "cascade = CascadeType.ALL, orphanRemoval = true";
+          cascadeForManyToOne = "cascade = CascadeType.ALL"; // No orphanRemoval
+        } else if (relation.relationType === "aggregation") {
+          // Agregación: CASCADE limitado
+          cascadeForOneToMany = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
+          cascadeForOneToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
+          cascadeForManyToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
+        } else {
+          // Asociación, Realización, Dependencia: sin cascade automático
+          cascadeForOneToMany = "";
+          cascadeForOneToOne = "";
+          cascadeForManyToOne = "";
+        }
+
+        if (isManyToMany) {
+          // @ManyToMany - Solo el lado "owner" tiene @JoinTable
+          const isOwner = r.isSource ? r.owningSide === "source" : r.owningSide === "target";
+
+          const srcTable = toTableName(r.isSource ? ent.name : r.other.name);
+          const dstTable = toTableName(r.isSource ? r.other.name : ent.name);
+          const junctionTableName = [srcTable, dstTable].sort().join("_");
+
+          const cascadeClause = cascadeForManyToOne ? `, ${cascadeForManyToOne}` : "";
+
+          if (isOwner) {
+            // Lado owner con @JoinTable
+            fields += `
+  @ManyToMany${cascadeClause}
+  @JoinTable(
+    name = "${junctionTableName}",
+    joinColumns = @JoinColumn(name = "${srcTable.replace(/_/g, "")}_id"),
+    inverseJoinColumns = @JoinColumn(name = "${dstTable.replace(/_/g, "")}_id")
+  )
+  private java.util.Set<${otherName}> ${currentFieldName} = new java.util.HashSet<>();\n`;
+          } else {
+            // Lado inverso con mappedBy
+            fields += `
+  @ManyToMany(mappedBy = "${otherFieldName}"${cascadeClause})
+  private java.util.Set<${otherName}> ${currentFieldName} = new java.util.HashSet<>();\n`;
+          }
 
           relationAccessors.push(
-            `  public ${otherName} get${capitalize(otherVar)}(){ return this.${otherVar}; }
-  public void set${capitalize(otherVar)}(${otherName} ${otherVar}){ this.${otherVar} = ${otherVar}; }`,
+            `  public java.util.Set<${otherName}> get${capitalize(currentFieldName)}(){ return this.${currentFieldName}; }
+  public void set${capitalize(currentFieldName)}(java.util.Set<${otherName}> ${currentFieldName}){ this.${currentFieldName} = ${currentFieldName}; }`,
+          );
+        } else if (thisIsOneToOne) {
+          // @OneToOne - la FK puede estar en cualquier lado
+          const isOwner = !r.isSource; // Por convención, ponemos FK en el lado "target"
+
+          const cascadeClause = cascadeForOneToOne ? `, ${cascadeForOneToOne}` : "";
+
+          if (isOwner) {
+            // Lado con FK
+            fields += `
+  @OneToOne(fetch = FetchType.LAZY${cascadeClause})
+  @JoinColumn(name = "${currentFieldName}_id", unique = true)
+  private ${otherName} ${currentFieldName};\n`;
+          } else {
+            // Lado sin FK (mappedBy)
+            fields += `
+  @OneToOne(mappedBy = "${otherFieldName}"${cascadeClause})
+  private ${otherName} ${currentFieldName};\n`;
+          }
+
+          relationAccessors.push(
+            `  public ${otherName} get${capitalize(currentFieldName)}(){ return this.${currentFieldName}; }
+  public void set${capitalize(currentFieldName)}(${otherName} ${currentFieldName}){ this.${currentFieldName} = ${currentFieldName}; }`,
+          );
+        } else if (thisHasManyToOne) {
+          // @ManyToOne - este lado tiene la FK (NO soporta orphanRemoval)
+          const cascadeClause = cascadeForManyToOne ? `, ${cascadeForManyToOne}` : "";
+
+          // Usar @JsonIgnore para evitar bucles infinitos y problemas con proxies de Hibernate
+          fields += `
+  @ManyToOne(fetch = FetchType.LAZY${cascadeClause})
+  @JoinColumn(name = "${currentFieldName}_id")
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  private ${otherName} ${currentFieldName};\n`;
+
+          relationAccessors.push(
+            `  public ${otherName} get${capitalize(currentFieldName)}(){ return this.${currentFieldName}; }
+  public void set${capitalize(currentFieldName)}(${otherName} ${currentFieldName}){ this.${currentFieldName} = ${currentFieldName}; }`,
           );
 
           // Para generar repo/service/controller de filtrado por padre
           const otherIdAttr = (r.other.attributes as Attr[] | undefined)?.find((a) => a.pk);
           const otherIdType = toJavaType(otherIdAttr?.type ?? "Long");
-          manyToOneFinders.push({ fieldName: otherVar, targetIdType: otherIdType });
-        }
+          const otherIdFieldName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+          manyToOneFinders.push({
+            fieldName: currentFieldName,
+            targetIdType: otherIdType,
+            targetIdFieldName: otherIdFieldName
+          });
+        } else if (thisHasOneToMany) {
+          // @OneToMany - mappedBy apunta al campo del lado MANY
+          const cascadeClause = cascadeForOneToMany ? `, ${cascadeForOneToMany}` : "";
 
-        if (thisHasOneToMany) {
-          // mappedBy = nombre del campo en el lado MANY que apunta a "este" (varName)
           fields += `
-  @com.fasterxml.jackson.annotation.JsonManagedReference("${pairName}")
-  @OneToMany(mappedBy = "${varName}", cascade = CascadeType.ALL, orphanRemoval = true)
-  private java.util.List<${otherName}> ${otherVar}s = new java.util.ArrayList<>();\n`;
+  @OneToMany(mappedBy = "${otherFieldName}"${cascadeClause})
+  private java.util.List<${otherName}> ${currentFieldName} = new java.util.ArrayList<>();\n`;
 
           relationAccessors.push(
-            `  public java.util.List<${otherName}> get${capitalize(otherVar)}s(){ return this.${otherVar}s; }
-  public void set${capitalize(otherVar)}s(java.util.List<${otherName}> ${otherVar}s){ this.${otherVar}s = ${otherVar}s; }`,
+            `  public java.util.List<${otherName}> get${capitalize(currentFieldName)}(){ return this.${currentFieldName}; }
+  public void set${capitalize(currentFieldName)}(java.util.List<${otherName}> ${currentFieldName}){ this.${currentFieldName} = ${currentFieldName}; }`,
           );
         }
       }
@@ -312,8 +506,7 @@ import jakarta.persistence.*;
 import java.time.*;
 import java.util.*;
 
-@Entity
-public class ${className} {
+${classAnnotations}public class ${className}${extendsClause} {
 
 ${fields}
   // getters & setters
@@ -323,11 +516,204 @@ ${relationAccessors.length ? "\n" + relationAccessors.join("\n") : ""}
 `;
       zip.file(`${modelDir}/${className}.java`, model);
 
+      // ===== DTO =====
+      // Generar DTO con solo los campos básicos + IDs de las relaciones ManyToOne
+      let dtoFields = "";
+      let dtoAccessors = "";
+
+      // Campos básicos (ID + atributos propios + atributos heredados)
+      const dtoFieldsList: Array<{name: string, type: string}> = [
+        { name: idName, type: idTypeJava }
+      ];
+
+      // Si es subclase, agregar campos de la superclase
+      if (isSubclass && inheritanceInfo) {
+        const parentEntity = byId.get(inheritanceInfo.parentId);
+        if (parentEntity) {
+          const parentAttrs = (parentEntity.attributes || []) as Attr[];
+          for (const a of parentAttrs) {
+            if (a.pk) continue; // No incluir ID del padre (se hereda)
+            dtoFieldsList.push({
+              name: (a.name || "field").replace(/[^A-Za-z0-9_]/g, ""),
+              type: toJavaType(a.type || "String")
+            });
+          }
+        }
+      }
+
+      // Agregar campos propios de la entidad
+      for (const a of attrs) {
+        if (a.pk) continue;
+        dtoFieldsList.push({
+          name: (a.name || "field").replace(/[^A-Za-z0-9_]/g, ""),
+          type: toJavaType(a.type || "String")
+        });
+      }
+
+      // Agregar IDs de relaciones ManyToOne
+      for (const r of rels) {
+        const relation = r.relation;
+        if (relation.relationType === "generalization") continue;
+
+        const thisHasManyToOne =
+          (r.isSource && r.srcMany && !r.dstMany) ||
+          (!r.isSource && r.dstMany && !r.srcMany);
+
+        if (thisHasManyToOne) {
+          const otherIdAttr = (r.other.attributes as Attr[] | undefined)?.find((a) => a.pk);
+          const otherIdName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+          const otherIdType = toJavaType(otherIdAttr?.type ?? "Long");
+          const otherName = r.other.name.replace(/[^A-Za-z0-9]/g, "") || "Other";
+
+          const isSourceEntity = relation.sourceId === ent.idInCanvas;
+          const sourceEntity = isSourceEntity ? ent : r.other;
+          const targetEntity = isSourceEntity ? r.other : ent;
+          const { fieldName, inverseName } = generateRelationNames(
+            relation.relationType,
+            sourceEntity,
+            targetEntity,
+            relation.sourceCard,
+            relation.targetCard
+          );
+          const currentFieldName = isSourceEntity ? fieldName : inverseName;
+
+          dtoFieldsList.push({ name: `${currentFieldName}${capitalize(otherIdName)}`, type: otherIdType });
+        }
+      }
+
+      // Generar fields y accessors para el DTO
+      for (const {name, type} of dtoFieldsList) {
+        dtoFields += `  private ${type} ${name};\n`;
+        const N = capitalize(name);
+        dtoAccessors += `  public ${type} get${N}(){ return this.${name}; }
+  public void set${N}(${type} ${name}){ this.${name} = ${name}; }\n`;
+      }
+
+      const dto = `package ${basePkg}.dto;
+
+import java.time.*;
+import java.util.*;
+
+public class ${className}DTO {
+
+${dtoFields}
+  // getters & setters
+${dtoAccessors}}
+`;
+      zip.file(`${dtoDir}/${className}DTO.java`, dto);
+
+      // ===== MAPPER =====
+      // Generar mapper para Entity <-> DTO
+      let toEntityMappings = "";
+      let toDTOMappings = "";
+      const relatedEntityImports = new Set<string>();
+
+      // Mapeos básicos
+      for (const {name} of dtoFieldsList) {
+        const N = capitalize(name);
+        const isRelationId = name.includes(capitalize(idName)) && name !== idName;
+
+        if (!isRelationId) {
+          // Campo simple
+          toEntityMappings += `    entity.set${N}(dto.get${N}());\n`;
+          toDTOMappings += `    dto.set${N}(entity.get${N}());\n`;
+        }
+      }
+
+      // Mapeos de relaciones ManyToOne
+      for (const r of rels) {
+        const relation = r.relation;
+        if (relation.relationType === "generalization") continue;
+
+        const thisHasManyToOne =
+          (r.isSource && r.srcMany && !r.dstMany) ||
+          (!r.isSource && r.dstMany && !r.srcMany);
+
+        if (thisHasManyToOne) {
+          const otherName = r.other.name.replace(/[^A-Za-z0-9]/g, "") || "Other";
+          const otherIdAttr = (r.other.attributes as Attr[] | undefined)?.find((a) => a.pk);
+          const otherIdName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+
+          // Agregar import de la entidad relacionada
+          relatedEntityImports.add(otherName);
+
+          const isSourceEntity = relation.sourceId === ent.idInCanvas;
+          const sourceEntity = isSourceEntity ? ent : r.other;
+          const targetEntity = isSourceEntity ? r.other : ent;
+          const { fieldName, inverseName } = generateRelationNames(
+            relation.relationType,
+            sourceEntity,
+            targetEntity,
+            relation.sourceCard,
+            relation.targetCard
+          );
+          const currentFieldName = isSourceEntity ? fieldName : inverseName;
+          const fieldNameCap = capitalize(currentFieldName);
+          const dtoIdField = `${currentFieldName}${capitalize(otherIdName)}`;
+          const dtoIdFieldCap = capitalize(dtoIdField);
+
+          // Entity -> DTO: extraer solo el ID
+          toDTOMappings += `    if (entity.get${fieldNameCap}() != null) {
+      dto.set${dtoIdFieldCap}(entity.get${fieldNameCap}().get${capitalize(otherIdName)}());
+    }\n`;
+
+          // DTO -> Entity: crear referencia solo con ID
+          toEntityMappings += `    if (dto.get${dtoIdFieldCap}() != null) {
+      ${otherName} ref = new ${otherName}();
+      ref.set${capitalize(otherIdName)}(dto.get${dtoIdFieldCap}());
+      entity.set${fieldNameCap}(ref);
+    }\n`;
+        }
+      }
+
+      // Generar imports de entidades relacionadas
+      const relatedImports = Array.from(relatedEntityImports)
+        .map(entity => `import ${basePkg}.model.${entity};`)
+        .join("\n");
+
+      const mapper = `package ${basePkg}.mapper;
+
+import ${basePkg}.model.${className};
+import ${basePkg}.dto.${className}DTO;
+${relatedImports ? relatedImports + "\n" : ""}import java.util.List;
+import java.util.stream.Collectors;
+
+public class ${className}Mapper {
+
+  public static ${className}DTO toDTO(${className} entity) {
+    if (entity == null) return null;
+    ${className}DTO dto = new ${className}DTO();
+${toDTOMappings}    return dto;
+  }
+
+  public static ${className} toEntity(${className}DTO dto) {
+    if (dto == null) return null;
+    ${className} entity = new ${className}();
+${toEntityMappings}    return entity;
+  }
+
+  public static void updateEntityFromDTO(${className}DTO dto, ${className} entity) {
+    if (dto == null || entity == null) return;
+${toEntityMappings}  }
+
+  public static List<${className}DTO> toDTOList(List<${className}> entities) {
+    if (entities == null) return null;
+    return entities.stream().map(${className}Mapper::toDTO).collect(Collectors.toList());
+  }
+
+  public static List<${className}> toEntityList(List<${className}DTO> dtos) {
+    if (dtos == null) return null;
+    return dtos.stream().map(${className}Mapper::toEntity).collect(Collectors.toList());
+  }
+}
+`;
+      zip.file(`${mapperDir}/${className}Mapper.java`, mapper);
+
       // ===== REPOSITORY =====
-      // Extendemos con findBy<ManyToOneField>Id si corresponde
+      // Extendemos con findBy<ManyToOneField>_<IdField> usando Spring Data JPA property expressions
       let extraRepoMethods = "";
       for (const f of manyToOneFinders) {
-        extraRepoMethods += `\n  java.util.List<${className}> findBy${capitalize(f.fieldName)}Id(${f.targetIdType} id);`;
+        extraRepoMethods += `\n  java.util.List<${className}> findBy${capitalize(f.fieldName)}_${capitalize(f.targetIdFieldName)}(${f.targetIdType} ${f.targetIdFieldName});`;
       }
 
       const repo = `package ${basePkg}.repository;
@@ -344,10 +730,37 @@ public interface ${className}Repository extends JpaRepository<${className}, ${id
       let extraService = "";
       for (const f of manyToOneFinders) {
         extraService += `
-  public java.util.List<${className}> findBy${capitalize(f.fieldName)}(${f.targetIdType} ${f.fieldName}Id){
-    return repo.findBy${capitalize(f.fieldName)}Id(${f.fieldName}Id);
+  public java.util.List<${className}> findBy${capitalize(f.fieldName)}(${f.targetIdType} ${f.targetIdFieldName}){
+    return repo.findBy${capitalize(f.fieldName)}_${capitalize(f.targetIdFieldName)}(${f.targetIdFieldName});
   }`;
       }
+
+      // Generar imports de repositorios relacionados y método de resolución
+      const relatedRepoImports = Array.from(relatedEntityImports)
+        .map(entity => `import ${basePkg}.repository.${entity}Repository;`)
+        .join("\n");
+
+      const relatedRepoFields = Array.from(relatedEntityImports)
+        .map(entity => `  private final ${entity}Repository ${entity.charAt(0).toLowerCase() + entity.slice(1)}Repository;`)
+        .join("\n");
+
+      const constructorParams = Array.from(relatedEntityImports)
+        .map(entity => `${entity}Repository ${entity.charAt(0).toLowerCase() + entity.slice(1)}Repository`)
+        .join(", ");
+
+      const constructorAssignments = Array.from(relatedEntityImports)
+        .map(entity => {
+          const varName = entity.charAt(0).toLowerCase() + entity.slice(1);
+          return `    this.${varName}Repository = ${varName}Repository;`;
+        })
+        .join("\n");
+
+      const hasRelations = relatedEntityImports.size > 0;
+
+      // Generar imports de entidades relacionadas para el Service
+      const relatedEntityServiceImports = Array.from(relatedEntityImports)
+        .map(entity => `import ${basePkg}.model.${entity};`)
+        .join("\n");
 
       const service = `package ${basePkg}.service;
 
@@ -356,19 +769,65 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ${basePkg}.model.${className};
 import ${basePkg}.repository.${className}Repository;
-
+${relatedRepoImports ? relatedRepoImports + "\n" : ""}${relatedEntityServiceImports ? relatedEntityServiceImports + "\n" : ""}
 @Service
 @Transactional
 public class ${className}Service {
   private final ${className}Repository repo;
+${hasRelations ? relatedRepoFields : ""}
 
-  public ${className}Service(${className}Repository repo) {
+  public ${className}Service(${className}Repository repo${hasRelations ? ", " + constructorParams : ""}) {
     this.repo = repo;
+${hasRelations ? constructorAssignments : ""}
   }
 
   public List<${className}> findAll(){ return repo.findAll(); }
   public ${className} findById(${idTypeJava} id){ return repo.findById(id).orElse(null); }
-  public ${className} save(${className} e){ return repo.save(e); }
+
+  public ${className} save(${className} e){
+    // Resolver referencias de entidades relacionadas antes de guardar
+    // El Mapper crea referencias "stub" con solo el ID, necesitamos cargar la entidad completa
+${Array.from(relatedEntityImports).map(entity => {
+    const rel = rels.find(r => r.other.name.replace(/[^A-Za-z0-9]/g, "") === entity);
+    if (!rel) return "";
+    const relation = rel.relation;
+    if (relation.relationType === "generalization") return "";
+
+    const thisHasManyToOne =
+      (rel.isSource && rel.srcMany && !rel.dstMany) ||
+      (!rel.isSource && rel.dstMany && !rel.srcMany);
+
+    if (!thisHasManyToOne) return "";
+
+    const isSourceEntity = relation.sourceId === ent.idInCanvas;
+    const sourceEntity = isSourceEntity ? ent : rel.other;
+    const targetEntity = isSourceEntity ? rel.other : ent;
+    const { fieldName, inverseName } = generateRelationNames(
+      relation.relationType,
+      sourceEntity,
+      targetEntity,
+      relation.sourceCard,
+      relation.targetCard
+    );
+    const currentFieldName = isSourceEntity ? fieldName : inverseName;
+    const fieldNameCap = capitalize(currentFieldName);
+    const otherIdAttr = (rel.other.attributes as Attr[] | undefined)?.find((a) => a.pk);
+    const otherIdName = (otherIdAttr?.name ?? "id").replace(/[^A-Za-z0-9_]/g, "") || "id";
+    const varName = entity.charAt(0).toLowerCase() + entity.slice(1);
+
+    return `    if (e.get${fieldNameCap}() != null) {
+      ${entity} current = e.get${fieldNameCap}();
+      // Si la referencia tiene ID, cargar la entidad completa desde la BD
+      if (current.get${capitalize(otherIdName)}() != null) {
+        ${entity} resolved = ${varName}Repository.findById(current.get${capitalize(otherIdName)}())
+          .orElseThrow(() -> new RuntimeException("${entity} con id " + current.get${capitalize(otherIdName)}() + " no encontrado"));
+        e.set${fieldNameCap}(resolved);
+      }
+    }`;
+  }).filter(s => s).join("\n")}
+    return repo.save(e);
+  }
+
   public void delete(${idTypeJava} id){ repo.deleteById(id); }${extraService}
 }
 `;
@@ -379,12 +838,12 @@ public class ${className}Service {
 
       let extraEndpoints = "";
       for (const f of manyToOneFinders) {
-        // /api/<entity>/<field>/{id}
+        // /api/<entity>/<field>/{idField}
         extraEndpoints += `
 
-  @GetMapping("/${f.fieldName}/{${f.fieldName}Id}")
-  public java.util.List<${className}> by${capitalize(f.fieldName)}(@PathVariable ${f.targetIdType} ${f.fieldName}Id){
-    return service.findBy${capitalize(f.fieldName)}(${f.fieldName}Id);
+  @GetMapping("/${f.fieldName}/{${f.targetIdFieldName}}")
+  public java.util.List<${className}DTO> by${capitalize(f.fieldName)}(@PathVariable ${f.targetIdType} ${f.targetIdFieldName}){
+    return ${className}Mapper.toDTOList(service.findBy${capitalize(f.fieldName)}(${f.targetIdFieldName}));
   }`;
       }
 
@@ -392,11 +851,12 @@ public class ${className}Service {
 
 import java.util.List;
 import org.springframework.web.bind.annotation.*;
-import ${basePkg}.model.${className};
+import ${basePkg}.dto.${className}DTO;
+import ${basePkg}.mapper.${className}Mapper;
 import ${basePkg}.service.${className}Service;
 
 @RestController
-@RequestMapping("/api/${varName}")
+@RequestMapping("/${varName}")
 @CrossOrigin
 public class ${className}Controller {
   private final ${className}Service service;
@@ -406,18 +866,24 @@ public class ${className}Controller {
   }
 
   @GetMapping
-  public List<${className}> all(){ return service.findAll(); }
+  public List<${className}DTO> all(){
+    return ${className}Mapper.toDTOList(service.findAll());
+  }
 
   @GetMapping("/{id}")
-  public ${className} byId(@PathVariable ${idTypeJava} id){ return service.findById(id); }${extraEndpoints}
+  public ${className}DTO byId(@PathVariable ${idTypeJava} id){
+    return ${className}Mapper.toDTO(service.findById(id));
+  }${extraEndpoints}
 
   @PostMapping
-  public ${className} create(@RequestBody ${className} body){ return service.save(body); }
+  public ${className}DTO create(@RequestBody ${className}DTO dto){
+    return ${className}Mapper.toDTO(service.save(${className}Mapper.toEntity(dto)));
+  }
 
   @PutMapping("/{id}")
-  public ${className} update(@PathVariable ${idTypeJava} id, @RequestBody ${className} body){
-    body.${setterId}(id);
-    return service.save(body);
+  public ${className}DTO update(@PathVariable ${idTypeJava} id, @RequestBody ${className}DTO dto){
+    dto.${setterId}(id);
+    return ${className}Mapper.toDTO(service.save(${className}Mapper.toEntity(dto)));
   }
 
   @DeleteMapping("/{id}")

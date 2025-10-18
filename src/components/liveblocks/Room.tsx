@@ -27,9 +27,10 @@ export function Room({
           pencilDraft: null,
         }}
         initialStorage={{
-          roomColor: { r: 30, g: 30, b: 30 },
+          roomColor: { r: 255, g: 255, b: 255 },
           layers: new LiveMap<string, LiveObject<Layer>>(),
           layerIds: new LiveList([]),
+          projectConfig: null,
         }}
       >
         <ClientSideSuspense

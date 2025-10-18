@@ -2,8 +2,10 @@
 
 import React, { useMemo } from "react";
 import { useMutation, useOthers, useSelf, useStorage } from "@liveblocks/react";
+import { nanoid } from "nanoid";
 import Link from "next/link";
 import { PiSidebarSimpleThin } from "react-icons/pi";
+import { IoLayersOutline, IoCubeOutline, IoGitNetworkOutline } from "react-icons/io5";
 
 import { Color, Layer, LayerType, EntityLayer, RelationLayer } from "~/types";
 import { colorToCss, connectionIdToColor, hexToRgb } from "~/utils";
@@ -111,6 +113,53 @@ export default function Sidebars({
     [selectedLayerId],
   );
 
+  // Mutations para atributos
+  const addAttribute = useMutation(
+    ({ storage }) => {
+      if (!selectedLayerId) return;
+      const lo: any = storage.get("layers").get(selectedLayerId);
+      if (!lo) return;
+      const current = lo.toImmutable() as EntityLayer;
+      const newAttr = {
+        id: nanoid(),
+        name: "nuevoCampo",
+        type: "string",
+        required: false,
+        pk: false,
+      };
+      lo.update({ attributes: [...(current.attributes || []), newAttr] });
+    },
+    [selectedLayerId],
+  );
+
+  const updateAttribute = useMutation(
+    ({ storage }, attrId: string, patch: any) => {
+      if (!selectedLayerId) return;
+      const lo: any = storage.get("layers").get(selectedLayerId);
+      if (!lo) return;
+      const current = lo.toImmutable() as EntityLayer;
+      const attrs = current.attributes || [];
+      const index = attrs.findIndex((a) => a.id === attrId);
+      if (index < 0) return;
+      const updated = [...attrs];
+      updated[index] = { ...attrs[index], ...patch };
+      lo.update({ attributes: updated });
+    },
+    [selectedLayerId],
+  );
+
+  const deleteAttribute = useMutation(
+    ({ storage }, attrId: string) => {
+      if (!selectedLayerId) return;
+      const lo: any = storage.get("layers").get(selectedLayerId);
+      if (!lo) return;
+      const current = lo.toImmutable() as EntityLayer;
+      const attrs = current.attributes || [];
+      lo.update({ attributes: attrs.filter((a) => a.id !== attrId) });
+    },
+    [selectedLayerId],
+  );
+
   // Wrapper amigable
   const updateSelected = (
     patch: Partial<EntityLayer> & Partial<RelationLayer>,
@@ -125,6 +174,28 @@ export default function Sidebars({
 
   /* =============================== RENDER =============================== */
 
+  // Agrupar capas por tipo
+  const { entities, relations } = useMemo(() => {
+    const entities: string[] = [];
+    const relations: string[] = [];
+
+    if (layerIds) {
+      layerIds.forEach((id) => {
+        const lo: any = layers?.get(id);
+        const layer = toPojo<Layer>(lo);
+        if (!layer) return;
+
+        if (layer.type === LayerType.Entity) {
+          entities.push(id);
+        } else if (layer.type === LayerType.Relation) {
+          relations.push(id);
+        }
+      });
+    }
+
+    return { entities, relations };
+  }, [layerIds, layers]);
+
   const layerListItem = (id: string) => {
     const lo: any = layers?.get(id);
     const layer = toPojo<Layer>(lo);
@@ -138,9 +209,11 @@ export default function Sidebars({
         <LayerButton
           key={id}
           layerId={id}
-          text={`Entidad: ${ent.name ?? "Entidad"}`}
+          text={ent.name ?? "Entidad"}
           isSelected={isSelected}
-          icon={<span className="text-gray-500">📦</span>}
+          icon={
+            <IoCubeOutline className="h-5 w-5" />
+          }
         />
       );
     }
@@ -149,14 +222,16 @@ export default function Sidebars({
       const rel = layer as RelationLayer;
       const src = toPojo<EntityLayer>(layers?.get(rel.sourceId));
       const dst = toPojo<EntityLayer>(layers?.get(rel.targetId));
-      const label = `Relación: ${src?.name ?? "?"} → ${dst?.name ?? "?"}`;
+      const label = `${src?.name ?? "?"} → ${dst?.name ?? "?"}`;
       return (
         <LayerButton
           key={id}
           layerId={id}
           text={label}
           isSelected={isSelected}
-          icon={<span className="text-gray-500">🔗</span>}
+          icon={
+            <IoGitNetworkOutline className="h-5 w-5" />
+          }
         />
       );
     }
@@ -186,9 +261,62 @@ export default function Sidebars({
           <Divider />
 
           {/* Lista de capas */}
-          <div className="flex flex-col gap-2 p-4">
-            <span className="mb-1 text-sm font-medium text-gray-600">Capas</span>
-            {layerIds && reversedLayerIds.map((id) => layerListItem(id))}
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="flex items-center gap-2 mb-3 sticky top-0 bg-white py-2">
+              <IoLayersOutline className="h-5 w-5 text-gray-600" />
+              <h3 className="text-sm font-semibold text-gray-700">Capas</h3>
+              {layerIds && layerIds.length > 0 && (
+                <span className="ml-auto rounded-full bg-gray-200 px-2 py-0.5 text-xs font-semibold text-gray-600">
+                  {layerIds.length}
+                </span>
+              )}
+            </div>
+
+            {!layerIds || layerIds.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <IoLayersOutline className="h-12 w-12 text-gray-300 mb-2" />
+                <p className="text-sm text-gray-500">No hay capas</p>
+                <p className="text-xs text-gray-400 mt-1">Crea una entidad o relación</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Entidades */}
+                {entities.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <IoCubeOutline className="h-4 w-4 text-gray-500" />
+                      <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                        Entidades
+                      </span>
+                      <span className="ml-auto rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-600">
+                        {entities.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {entities.map((id) => layerListItem(id))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Relaciones */}
+                {relations.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <IoGitNetworkOutline className="h-4 w-4 text-gray-500" />
+                      <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                        Relaciones
+                      </span>
+                      <span className="ml-auto rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-600">
+                        {relations.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {relations.map((id) => layerListItem(id))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -250,6 +378,7 @@ export default function Sidebars({
                 <Section title="Entidad">
                   <Label text="Nombre" />
                   <input
+                    key={`entity-name-${selectedLayerId}`}
                     className="h-8 rounded border px-2 text-sm outline-none"
                     defaultValue={(selectedLayerPOJO as EntityLayer).name ?? "Entidad"}
                     onBlur={(e) => {
@@ -260,54 +389,86 @@ export default function Sidebars({
                 </Section>
 
                 <Divider />
-                <Section title="Posición">
-                  <Label text="Coordenadas" />
-                  <div className="flex gap-2">
-                    <NumberInput
-                      value={selectedLayerPOJO.x ?? 0}
-                      onChange={(n) => updateSelected({ x: n })}
-                      classNames="w-1/2"
-                      icon={<p>X</p>}
-                    />
-                    <NumberInput
-                      value={selectedLayerPOJO.y ?? 0}
-                      onChange={(n) => updateSelected({ y: n })}
-                      classNames="w-1/2"
-                      icon={<p>Y</p>}
-                    />
-                  </div>
-                </Section>
+                <Section title="Atributos">
+                  <div className="max-h-[300px] space-y-2 overflow-y-auto">
+                    {((selectedLayerPOJO as EntityLayer).attributes || []).map((attr) => (
+                      <div key={attr.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                        {/* Nombre del atributo */}
+                        <div>
+                          <Label text="Nombre" />
+                          <input
+                            key={`attr-name-${attr.id}`}
+                            className="h-7 w-full rounded border border-gray-300 px-2 text-xs outline-none focus:border-blue-500"
+                            defaultValue={attr.name}
+                            onBlur={(e) => {
+                              const v = e.currentTarget.value.trim() || "campo";
+                              updateAttribute(attr.id, { name: v });
+                            }}
+                          />
+                        </div>
 
-                <Divider />
-                <Section title="Tamaño">
-                  <Label text="Dimensiones" />
-                  <div className="flex gap-2">
-                    <NumberInput
-                      value={selectedLayerPOJO.width ?? 0}
-                      onChange={(n) => updateSelected({ width: n })}
-                      classNames="w-1/2"
-                      icon={<p>W</p>}
-                    />
-                    <NumberInput
-                      value={selectedLayerPOJO.height ?? 0}
-                      onChange={(n) => updateSelected({ height: n })}
-                      classNames="w-1/2"
-                      icon={<p>H</p>}
-                    />
-                  </div>
-                </Section>
+                        {/* Tipo de dato */}
+                        <div>
+                          <Label text="Tipo" />
+                          <select
+                            className="h-7 w-full rounded border border-gray-300 px-2 text-xs outline-none focus:border-blue-500"
+                            value={attr.type ?? "string"}
+                            onChange={(e) => updateAttribute(attr.id, { type: e.target.value })}
+                          >
+                            <option value="string">string</option>
+                            <option value="int">int</option>
+                            <option value="long">long</option>
+                            <option value="float">float</option>
+                            <option value="double">double</option>
+                            <option value="boolean">boolean</option>
+                            <option value="date">date</option>
+                            <option value="datetime">datetime</option>
+                            <option value="uuid">uuid</option>
+                            <option value="email">email</option>
+                            <option value="password">password</option>
+                          </select>
+                        </div>
 
-                <Divider />
-                <Section title="Apariencia">
-                  <Label text="Opacidad" />
-                  <NumberInput
-                    value={selectedLayerPOJO.opacity ?? 100}
-                    min={0}
-                    max={100}
-                    onChange={(n) => updateSelected({ opacity: n })}
-                    classNames="w-full"
-                    icon={<p>%</p>}
-                  />
+                        {/* Checkboxes */}
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={attr.required ?? false}
+                              onChange={(e) => updateAttribute(attr.id, { required: e.target.checked })}
+                              className="h-3.5 w-3.5 rounded"
+                            />
+                            <span>Requerido</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={attr.pk ?? false}
+                              onChange={(e) => updateAttribute(attr.id, { pk: e.target.checked })}
+                              className="h-3.5 w-3.5 rounded"
+                            />
+                            <span>PK</span>
+                          </label>
+                        </div>
+
+                        {/* Botón eliminar */}
+                        <button
+                          onClick={() => deleteAttribute(attr.id)}
+                          className="w-full rounded bg-red-500 px-3 py-1.5 text-xs text-white hover:bg-red-600 transition-colors"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Botón añadir atributo */}
+                  <button
+                    onClick={() => addAttribute()}
+                    className="mt-3 w-full rounded-lg border-2 border-dashed border-blue-400 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-600 hover:bg-blue-100 transition-colors"
+                  >
+                    + Añadir Atributo
+                  </button>
                 </Section>
               </>
             ) : (
@@ -335,6 +496,86 @@ export default function Sidebars({
                       </div>
                     );
                   })()}
+                </Section>
+
+                <Divider />
+                <Section title="Tipo de Relación UML">
+                  <Label text="Selecciona el tipo" />
+                  <Dropdown
+                    value={(selectedLayerPOJO as RelationLayer).relationType ?? "association"}
+                    onChange={(v) =>
+                      updateSelected({
+                        relationType: v as RelationLayer["relationType"],
+                      })
+                    }
+                    options={[
+                      {
+                        value: "association",
+                        label: "Asociación",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                            <line x1="2" y1="10" x2="38" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                          </svg>
+                        )
+                      },
+                      {
+                        value: "aggregation",
+                        label: "Agregación",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                            <line x1="12" y1="10" x2="38" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                            <polygon points="2,10 7,6 12,10 7,14" stroke="currentColor" strokeWidth="1.5" fill="white" />
+                          </svg>
+                        )
+                      },
+                      {
+                        value: "composition",
+                        label: "Composición",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                            <line x1="12" y1="10" x2="38" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                            <polygon points="2,10 7,6 12,10 7,14" stroke="currentColor" strokeWidth="1.5" fill="currentColor" />
+                          </svg>
+                        )
+                      },
+                      {
+                        value: "generalization",
+                        label: "Herencia",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                            <line x1="2" y1="10" x2="32" y2="10" stroke="currentColor" strokeWidth="1.5" />
+                            <polygon points="32,6 38,10 32,14" fill="white" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        value: "realization",
+                        label: "Implementación",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                            <line x1="2" y1="10" x2="32" y2="10" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3, 2" />
+                            <polygon points="32,6 38,10 32,14" fill="white" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        value: "dependency",
+                        label: "Dependencia",
+                        icon: (
+                          <svg width="40" height="20" viewBox="0 0 40 20" role="img" aria-label="UML Dependencia" className="flex-shrink-0">
+                            <defs>
+                              <marker id="uml-vee-open-sidebar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M0,0 L10,5 L0,10" fill="none" stroke="currentColor" strokeWidth="2"/>
+                              </marker>
+                            </defs>
+                            <line x1="2" y1="10" x2="34" y2="10" stroke="currentColor" strokeWidth="1.5"
+                                  strokeDasharray="3 2" markerEnd="url(#uml-vee-open-sidebar)"
+                                  vectorEffect="non-scaling-stroke" strokeLinecap="round"/>
+                          </svg>
+                        )
+                      },
+                    ]}
+                  />
                 </Section>
 
                 <Divider />

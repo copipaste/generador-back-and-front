@@ -1,7 +1,7 @@
 // src/components/canvas/Entity.tsx
 "use client";
 
-import { memo, useRef, useState, useEffect } from "react";
+import { memo, useState } from "react";
 import { useMutation } from "@liveblocks/react";
 import { LiveObject } from "@liveblocks/client";
 import { nanoid } from "nanoid";
@@ -24,68 +24,7 @@ export default memo(function Entity({
   onPointerDown,
   onStartLink,
 }: Props) {
-  // Estado local de edición
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [editingAttrId, setEditingAttrId] = useState<string | null>(null);
-
-  // --- helper: asegura que la capa en storage sea siempre LiveObject ---
-  const getLiveLayer = (storage: any) => {
-    const map = storage.get("layers");
-    const current = map.get(id);
-    if (current && typeof (current as any).update === "function") {
-      return current as LiveObject<EntityLayer>;
-    }
-    const wrapped = new LiveObject<EntityLayer>((current ?? {}) as EntityLayer);
-    map.set(id, wrapped);
-    return wrapped;
-  };
-
-  // ----- Mutations Liveblocks -----
-  const updateName = useMutation(({ storage }, name: string) => {
-    const lo = getLiveLayer(storage);
-    lo.update({ name });
-  }, [id]);
-
-  const updateAttr = useMutation(({ storage }, attrId: string, patch: any) => {
-    const lo = getLiveLayer(storage);
-    const attrs = (lo.get("attributes") as any[]) ?? [];
-    const i = attrs.findIndex((a) => a.id === attrId);
-    if (i < 0) return;
-    const next = [...attrs];
-    next[i] = { ...attrs[i], ...patch };
-    lo.update({ attributes: next });
-  }, [id]);
-
-  const addAttr = useMutation(({ storage }) => {
-    const lo = getLiveLayer(storage);
-    const attrs = (lo.get("attributes") as any[]) ?? [];
-    const newAttr = {
-      id: nanoid(),
-      name: "nuevoCampo",
-      type: "string",
-      required: false,
-      pk: false,
-    };
-    lo.update({ attributes: [...attrs, newAttr] });
-    setEditingAttrId(newAttr.id);
-  }, [id]);
-
-  const delAttr = useMutation(({ storage }, attrId: string) => {
-    const lo = getLiveLayer(storage);
-    const attrs = (lo.get("attributes") as any[]) ?? [];
-    lo.update({ attributes: attrs.filter((a) => a.id !== attrId) });
-    if (editingAttrId === attrId) setEditingAttrId(null);
-  }, [id, editingAttrId]);
-
-  // Helpers de edición
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (editingTitle) titleInputRef.current?.focus();
-  }, [editingTitle]);
-
-  const stopAndSelect = (e: React.MouseEvent) => {
-    e.stopPropagation();
-  };
+  const [isHovered, setIsHovered] = useState(false);
 
   // --- Render ---
   const { x, y, width, height, name, attributes } = layer;
@@ -103,18 +42,32 @@ export default memo(function Entity({
       className="entity"
       transform={`translate(${x}, ${y})`}
       onPointerDown={(e) => onPointerDown(e, id)}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       style={{ cursor: "move" }}
     >
+      {/* Sombra */}
+      <rect
+        x={2}
+        y={2}
+        width={width}
+        height={HEADER_H + bodyH}
+        rx={8}
+        fill="rgba(0, 0, 0, 0.1)"
+        filter="blur(3px)"
+      />
+
       {/* cuerpo */}
       <rect
         x={0}
         y={HEADER_H}
         width={width}
         height={bodyH}
-        rx={6}
-        ry={6}
-        fill="#FBF3C2"
-        stroke="#B9B18A"
+        rx={8}
+        ry={8}
+        fill="#FFFFFF"
+        stroke="#E5E7EB"
+        strokeWidth={2}
       />
       {/* header */}
       <rect
@@ -122,158 +75,90 @@ export default memo(function Entity({
         y={0}
         width={width}
         height={HEADER_H}
-        rx={6}
-        ry={6}
-        fill="#F2D06B"
-        stroke="#B9B18A"
+        rx={8}
+        ry={8}
+        fill="#3B82F6"
+        stroke="#2563EB"
+        strokeWidth={2}
+      />
+      {/* Línea divisora entre header y body */}
+      <line
+        x1={0}
+        y1={HEADER_H}
+        x2={width}
+        y2={HEADER_H}
+        stroke="#E5E7EB"
+        strokeWidth={2}
       />
       {/* título */}
-      {!editingTitle ? (
-        <text
-          x={PADDING}
-          y={HEADER_H / 2 + 4}
-          fontSize={13}
-          fontWeight={700}
-          fill="#333"
-          onDoubleClick={(e) => {
-            stopAndSelect(e);
-            setEditingTitle(true);
-          }}
-          style={{ userSelect: "none" }}
-        >
-          {name}
-        </text>
-      ) : (
-        <foreignObject
-          x={PADDING}
-          y={4}
-          width={width - PADDING * 2}
-          height={HEADER_H - 8}
-        >
-          <input
-            ref={titleInputRef}
-            defaultValue={name}
-            onPointerDown={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onBlur={(e) => {
-              updateName(e.currentTarget.value.trim() || "Entidad");
-              setEditingTitle(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                (e.target as HTMLInputElement).blur();
-              }
-              if (e.key === "Escape") {
-                setEditingTitle(false);
-              }
-            }}
-            className="w-full h-full rounded px-2 text-[13px] font-semibold outline-none"
-            style={{ background: "white" }}
-          />
-        </foreignObject>
-      )}
+      <text
+        x={PADDING}
+        y={HEADER_H / 2 + 4}
+        fontSize={13}
+        fontWeight={700}
+        fill="#FFFFFF"
+        style={{ userSelect: "none" }}
+      >
+        {name}
+      </text>
 
       {/* atributos */}
       {(attributes ?? []).map((attr, idx) => {
         const top = HEADER_H + PADDING + idx * ROW_H + 2;
-        const isEditing = editingAttrId === attr.id;
 
         return (
           <g key={attr.id}>
-            {!isEditing ? (
+            {/* Icono de PK o bullet point */}
+            <text
+              x={PADDING}
+              y={top + 12}
+              fontSize={11}
+              fill={attr.pk ? "#F59E0B" : "#6B7280"}
+              style={{ userSelect: "none" }}
+            >
+              {attr.pk ? "🔑" : "•"}
+            </text>
+            {/* Nombre del atributo */}
+            <text
+              x={PADDING + 16}
+              y={top + 12}
+              fontSize={12}
+              fill="#1F2937"
+              fontWeight={attr.pk ? 600 : 400}
+              style={{ userSelect: "none" }}
+            >
+              {attr.name}
+            </text>
+            {/* Tipo del atributo */}
+            <text
+              x={PADDING + 16 + attr.name.length * 7}
+              y={top + 12}
+              fontSize={11}
+              fill="#6B7280"
+              fontStyle="italic"
+              style={{ userSelect: "none" }}
+            >
+              : {attr.type ?? "string"}
+            </text>
+            {/* Indicador de requerido */}
+            {attr.required && (
               <text
-                x={PADDING}
+                x={PADDING + 16 + attr.name.length * 7 + (attr.type ?? "string").length * 6 + 10}
                 y={top + 12}
-                fontSize={12}
-                fill="#333"
-                onDoubleClick={(e) => {
-                  stopAndSelect(e);
-                  setEditingAttrId(attr.id);
-                }}
+                fontSize={11}
+                fill="#EF4444"
+                fontWeight={700}
                 style={{ userSelect: "none" }}
               >
-                {attr.pk ? "🔑 " : ""}
-                {attr.name}: {attr.type}
-                {attr.required ? "!" : ""}
+                *
               </text>
-            ) : (
-              <foreignObject
-                x={PADDING}
-                y={top}
-                width={width - PADDING * 2}
-                height={ROW_H + 4}
-              >
-                <div
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className="flex items-center gap-2"
-                >
-                  <input
-                    defaultValue={attr.name}
-                    className="h-6 flex-1 rounded border px-2 text-[12px] outline-none"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") setEditingAttrId(null);
-                    }}
-                    onBlur={(e) =>
-                      updateAttr(attr.id, {
-                        name: e.currentTarget.value.trim() || "campo",
-                      })
-                    }
-                  />
-                  <select
-                    defaultValue={attr.type}
-                    className="h-6 rounded border px-1 text-[12px]"
-                    onChange={(e) =>
-                      updateAttr(attr.id, { type: e.target.value })
-                    }
-                  >
-                    <option>string</option>
-                    <option>int</option>
-                    <option>long</option>
-                    <option>double</option>
-                    <option>boolean</option>
-                    <option>date</option>
-                  </select>
-                  <label className="flex items-center gap-1 text-[12px]">
-                    <input
-                      type="checkbox"
-                      defaultChecked={!!attr.required}
-                      onChange={(e) =>
-                        updateAttr(attr.id, { required: e.target.checked })
-                      }
-                    />
-                    req
-                  </label>
-                  <label className="flex items-center gap-1 text-[12px]">
-                    <input
-                      type="checkbox"
-                      defaultChecked={!!attr.pk}
-                      onChange={(e) => updateAttr(attr.id, { pk: e.target.checked })}
-                    />
-                    pk
-                  </label>
-                  <button
-                    className="h-6 rounded bg-red-500 px-2 text-[12px] text-white"
-                    onClick={() => delAttr(attr.id)}
-                  >
-                    borrar
-                  </button>
-                  <button
-                    className="h-6 rounded bg-gray-200 px-2 text-[12px]"
-                    onClick={() => setEditingAttrId(null)}
-                  >
-                    ok
-                  </button>
-                </div>
-              </foreignObject>
             )}
           </g>
         );
       })}
 
-      {/* ====== HANDLES (fuera del map) ====== */}
-      {onStartLink && (
+      {/* ====== HANDLES (fuera del map) - Solo visibles en hover ====== */}
+      {onStartLink && isHovered && (
         <>
           {/* izquierda */}
           <circle
@@ -334,22 +219,6 @@ export default memo(function Entity({
         </>
       )}
       {/* ====== FIN HANDLES ====== */}
-
-      {/* botón agregar atributo */}
-      <foreignObject
-        x={PADDING}
-        y={HEADER_H + PADDING + (attributes?.length ?? 0) * ROW_H + 8}
-        width={width - PADDING * 2}
-        height={28}
-      >
-        <button
-          className="h-7 w-full rounded bg-white/70 text-[12px] hover:bg-white"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => addAttr()}
-        >
-          + Añadir atributo
-        </button>
-      </foreignObject>
 
       {/* === HITBOX para asegurar el click en modo Linking === */}
       <rect
