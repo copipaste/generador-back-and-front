@@ -49,7 +49,8 @@ export function useFlutterGenerator(projectName: string) {
     }
 
     // Usar ProjectConfig o valores por defecto
-    const config = projectConfig?.toImmutable?.() ?? projectConfig;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config = (projectConfig as any)?.toImmutable?.() ?? projectConfig;
     // Limpiar el nombre del paquete: solo letras minúsculas, números y guiones bajos
     const flutterPackageName = (config?.flutterPackageName ?? projectName)
       .toLowerCase()

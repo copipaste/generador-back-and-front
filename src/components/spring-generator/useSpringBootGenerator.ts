@@ -49,7 +49,8 @@ export function useSpringBootGenerator(projectName: string) {
     }
 
     // Usar ProjectConfig o valores por defecto
-    const config = projectConfig?.toImmutable?.() ?? projectConfig;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config = (projectConfig as any)?.toImmutable?.() ?? projectConfig;
     const basePkg = config?.groupId ?? "com.example.demo";
     const artifactId = config?.artifactId ?? projectName.replace(/\s+/g, "-").toLowerCase();
     const version = config?.version ?? "1.0.0";

@@ -145,7 +145,8 @@ export function usePostgreSQLGenerator(projectName: string) {
       return;
     }
 
-    const config = projectConfig?.toImmutable?.() ?? projectConfig;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config = (projectConfig as any)?.toImmutable?.() ?? projectConfig;
     const databaseName = config?.databaseName ?? projectName.replace(/\s+/g, "_").toLowerCase();
 
     let sql = `-- PostgreSQL Database Script
@@ -259,6 +260,7 @@ CREATE DATABASE ${databaseName};
     // Drop tables en orden inverso (las dependientes primero)
     for (let i = sortedEntities.length - 1; i >= 0; i--) {
       const ent = sortedEntities[i];
+      if (!ent) continue;
       const tableName = toTableName(ent.name);
       sql += `DROP TABLE IF EXISTS ${tableName} CASCADE;\n`;
     }

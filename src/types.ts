@@ -127,7 +127,7 @@ export type CanvasState =
   | { mode: CanvasMode.Resizing; initialBounds: XYWH; corner: Side }
   | { mode: CanvasMode.Dragging; origin: Point | null }
   | { mode: CanvasMode.SelectionNet; origin: Point; current: Point }
-  | { mode: CanvasMode.Inserting }
+  | { mode: CanvasMode.Inserting; layerType: LayerType }
   | { mode: CanvasMode.RightClick }
   | {
       mode: CanvasMode.Linking;
