@@ -15,9 +15,10 @@ const SelectionBox = memo(
       me.presence.selection.length === 1 ? me.presence.selection[0] : null,
     );
 
+    // Mostrar handles solo para entidades (las relaciones no necesitan resize handles)
     const isShowingHandles = useStorage(
       (root) =>
-        soleLayerId && root.layers.get(soleLayerId)?.type !== LayerType.Path,
+        soleLayerId && root.layers.get(soleLayerId)?.type === LayerType.Entity,
     );
 
     const bounds = useSelectionBounds();
