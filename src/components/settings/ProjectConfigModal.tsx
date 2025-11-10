@@ -30,6 +30,7 @@ const defaultConfig: ProjectConfig = {
   flutterEnabled: false,
   flutterVersion: "3.16.0",
   flutterPackageName: "com.ejemplo.proyecto_app",
+  flutterBaseUrl: "http://localhost:8080/api",
 };
 
 const ProjectConfigModal = ({ isOpen, onClose, onSave, initialConfig }: Props) => {
@@ -367,6 +368,27 @@ const ProjectConfigModal = ({ isOpen, onClose, onSave, initialConfig }: Props) =
                         onChange={(e) => setConfig({ ...config, flutterPackageName: e.target.value })}
                         placeholder="com.ejemplo.proyecto_app"
                       />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Base URL del API *
+                        <span className="ml-2 text-xs text-gray-500 font-normal">
+                          (URL del backend para Flutter)
+                        </span>
+                      </label>
+                      <input
+                        type="url"
+                        required={config.flutterEnabled}
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition"
+                        value={config.flutterBaseUrl ?? ""}
+                        onChange={(e) => setConfig({ ...config, flutterBaseUrl: e.target.value })}
+                        placeholder="http://localhost:8080/api"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">
+                        💡 Ejemplos: <code className="bg-gray-100 px-1 rounded">http://localhost:8080/api</code>, 
+                        <code className="bg-gray-100 px-1 rounded ml-1">http://192.168.1.5:8080/api</code>, 
+                        <code className="bg-gray-100 px-1 rounded ml-1">https://api.miapp.com</code>
+                      </p>
                     </div>
                   </div>
                 )}

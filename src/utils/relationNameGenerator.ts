@@ -126,15 +126,15 @@ export function toJavaType(diagramType: string): string {
 }
 
 /**
- * Convierte tipo de dato del diagrama a tipo de columna SQL
+ * Convierte tipo de dato del diagrama a tipo de columna SQL (PostgreSQL)
  */
 export function toSQLType(diagramType: string): string {
   const typeMap: Record<string, string> = {
     string: "VARCHAR(255)",
     int: "INTEGER",
     long: "BIGINT",
-    float: "FLOAT",
-    double: "DOUBLE",
+    float: "REAL",
+    double: "DOUBLE PRECISION",
     boolean: "BOOLEAN",
     date: "DATE",
     datetime: "TIMESTAMP",
@@ -164,6 +164,37 @@ export function toTableName(className: string): string {
  */
 export function toColumnName(fieldName: string): string {
   return fieldName
+    .replace(/([A-Z])/g, "_$1")
+    .toLowerCase()
+    .replace(/^_/, "");
+}
+
+/**
+ * Convierte tipo de dato del diagrama a tipo Dart (Flutter)
+ */
+export function toDartType(diagramType: string): string {
+  const typeMap: Record<string, string> = {
+    string: "String",
+    int: "int",
+    long: "int",
+    float: "double",
+    double: "double",
+    boolean: "bool",
+    date: "DateTime",
+    datetime: "DateTime",
+    uuid: "String",
+    email: "String",
+    password: "String",
+  };
+
+  return typeMap[diagramType.toLowerCase()] || "String";
+}
+
+/**
+ * Convierte nombre de clase a snake_case para archivos Dart
+ */
+export function toSnakeCase(className: string): string {
+  return className
     .replace(/([A-Z])/g, "_$1")
     .toLowerCase()
     .replace(/^_/, "");

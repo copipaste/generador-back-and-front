@@ -37,6 +37,106 @@ export function usePostgreSQLGenerator(projectName: string) {
     return { entities, relations };
   };
 
+  /**
+   * Ordenación topológica de entidades basada en dependencias (Foreign Keys)
+   * Utiliza el algoritmo de Kahn para detectar dependencias circulares
+   * 
+   * @param entities Lista de entidades sin ordenar
+   * @param relsByEntity Mapa de relaciones por entidad
+   * @param inheritanceMap Mapa de herencia (subclase -> padre)
+   * @param byId Mapa de entidades por ID
+   * @returns Lista de entidades ordenadas topológicamente
+   */
+  const topologicalSort = (
+    entities: PlainEntity[],
+    relsByEntity: Record<string, Array<{
+      other: PlainEntity;
+      srcMany: boolean;
+      dstMany: boolean;
+      isSource: boolean;
+      relation: PlainRelation;
+    }>>,
+    inheritanceMap: Map<string, { parentId: string; relation: PlainRelation }>,
+    byId: Map<string, PlainEntity>
+  ): PlainEntity[] => {
+    // Construir grafo de dependencias: entityId -> [entidades de las que depende]
+    const dependencies = new Map<string, Set<string>>();
+    
+    for (const ent of entities) {
+      const deps = new Set<string>();
+      
+      // Dependencia por herencia: la subclase depende del padre
+      const inheritanceInfo = inheritanceMap.get(ent.idInCanvas);
+      if (inheritanceInfo) {
+        deps.add(inheritanceInfo.parentId);
+      }
+      
+      // Dependencias por Foreign Keys
+      const rels = relsByEntity[ent.idInCanvas] || [];
+      for (const r of rels) {
+        const relation = r.relation;
+        
+        // Ignorar herencia (ya la procesamos arriba)
+        if (relation.relationType === "generalization") continue;
+        
+        // Determinar si esta entidad tiene una FK hacia la otra
+        const thisHasManyToOne =
+          (r.isSource && r.srcMany && !r.dstMany) ||
+          (!r.isSource && r.dstMany && !r.srcMany);
+        
+        const thisIsOneToOne = !r.srcMany && !r.dstMany && !r.isSource;
+        
+        if (thisHasManyToOne || thisIsOneToOne) {
+          // Esta entidad depende de la otra (tiene FK hacia ella)
+          deps.add(r.other.idInCanvas);
+        }
+      }
+      
+      dependencies.set(ent.idInCanvas, deps);
+    }
+    
+    // Algoritmo de Kahn para ordenación topológica
+    const sorted: PlainEntity[] = [];
+    const remaining = new Set(entities.map(e => e.idInCanvas));
+    
+    while (remaining.size > 0) {
+      // Buscar entidades sin dependencias pendientes
+      const noDeps: string[] = [];
+      
+      for (const id of remaining) {
+        const deps = dependencies.get(id) || new Set();
+        // Verificar si todas las dependencias ya fueron procesadas
+        const hasUnresolvedDeps = Array.from(deps).some(depId => remaining.has(depId));
+        if (!hasUnresolvedDeps) {
+          noDeps.push(id);
+        }
+      }
+      
+      // Si no hay entidades sin dependencias, hay un ciclo o error
+      if (noDeps.length === 0) {
+        console.warn(
+          "⚠️ Advertencia: Posible dependencia circular detectada en las tablas. " +
+          "Se usará el orden original para las tablas restantes."
+        );
+        // Agregar las restantes en el orden original
+        for (const id of remaining) {
+          const entity = byId.get(id);
+          if (entity) sorted.push(entity);
+        }
+        break;
+      }
+      
+      // Agregar entidades sin dependencias al resultado
+      for (const id of noDeps) {
+        const entity = byId.get(id);
+        if (entity) sorted.push(entity);
+        remaining.delete(id);
+      }
+    }
+    
+    return sorted;
+  };
+
   const generatePostgreSQLScript = () => {
     const { entities, relations } = getEntitiesAndRelations();
 
@@ -98,20 +198,13 @@ CREATE DATABASE ${databaseName};
 
 `;
 
-    // Drop tables en orden inverso (para evitar problemas con FKs)
-    // Las tablas intermedias se dropean como parte de las entidades normales
-    for (let i = entities.length - 1; i >= 0; i--) {
-      const ent = entities[i];
-      const tableName = toTableName(ent.name);
-      sql += `DROP TABLE IF EXISTS ${tableName} CASCADE;\n`;
-    }
-
-    sql += `\n-- ==================================================
--- 3. CREATE TABLES
--- ==================================================
-
-`;
-
+    // ==================================================
+    // ORDENACIÓN TOPOLÓGICA DE ENTIDADES
+    // ==================================================
+    // Necesitamos ordenar las entidades según sus dependencias para:
+    // 1. DROP en orden inverso (las dependientes primero)
+    // 2. CREATE en orden directo (las independientes primero)
+    
     const byId = new Map(entities.map((e) => [e.idInCanvas, e]));
 
     // Mapa de relaciones por entidad
@@ -160,8 +253,24 @@ CREATE DATABASE ${databaseName};
       }
     }
 
-    // Generar CREATE TABLE para cada entidad
-    for (const ent of entities) {
+    // Ordenar entidades topológicamente
+    const sortedEntities = topologicalSort(entities, relsByEntity, inheritanceMap, byId);
+
+    // Drop tables en orden inverso (las dependientes primero)
+    for (let i = sortedEntities.length - 1; i >= 0; i--) {
+      const ent = sortedEntities[i];
+      const tableName = toTableName(ent.name);
+      sql += `DROP TABLE IF EXISTS ${tableName} CASCADE;\n`;
+    }
+
+    sql += `\n-- ==================================================
+-- 3. CREATE TABLES
+-- ==================================================
+
+`;
+
+    // Generar CREATE TABLE para cada entidad (en orden topológico)
+    for (const ent of sortedEntities) {
       const tableName = toTableName(ent.name);
       const attrs = (ent.attributes || []) as Attr[];
       const idAttr = attrs.find((a) => a.pk);
@@ -292,7 +401,7 @@ CREATE DATABASE ${databaseName};
 `;
 
     // Crear índices en las Foreign Keys (mejora el rendimiento de JOINs)
-    for (const ent of entities) {
+    for (const ent of sortedEntities) {
       const tableName = toTableName(ent.name);
       const rels = relsByEntity[ent.idInCanvas] || [];
 
@@ -336,7 +445,7 @@ CREATE DATABASE ${databaseName};
 
 `;
 
-    for (const ent of entities) {
+    for (const ent of sortedEntities) {
       const tableName = toTableName(ent.name);
       sql += `-- INSERT INTO ${tableName} (...) VALUES (...);\n`;
     }

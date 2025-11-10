@@ -5,11 +5,22 @@ type AiRequest = { prompt: string };
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = (await req.json()) as AiRequest;
+    // Validar que se recibió el prompt
+    const body = await req.json();
+    const { prompt } = body as AiRequest;
+
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
+      return NextResponse.json(
+        { error: "El campo 'prompt' es requerido y debe contener texto" },
+        { status: 400 }
+      );
+    }
+
+    console.log("🤖 Generando diagrama desde texto:", prompt.substring(0, 100) + "...");
 
     const system = `
-Eres un asistente que convierte una descripción en lenguaje natural a un esquema Entidad-Relación minimalista.
-Devuelve SOLO JSON con este shape:
+Eres un asistente experto que convierte descripciones en lenguaje natural a diagramas Entidad-Relación.
+Devuelve SOLO JSON (sin markdown, sin explicaciones) con este formato exacto:
 
 {
   "entities": [
@@ -17,34 +28,41 @@ Devuelve SOLO JSON con este shape:
       "name": "NombreEntidad",
       "attributes": [
         { "name": "id", "type": "long", "pk": true, "required": true },
-        { "name": "campo", "type": "string", "required": false }
+        { "name": "nombreCampo", "type": "string", "required": false }
       ]
     }
   ],
   "relations": [
     {
-      "sourceName": "EntidadA",
-      "targetName": "EntidadB",
-      "sourceCard": "ONE"|"MANY",
-      "targetCard": "ONE"|"MANY",
-      "owningSide": "source"|"target"
+      "sourceName": "EntidadOrigen",
+      "targetName": "EntidadDestino",
+      "sourceCard": "ONE",
+      "targetCard": "MANY",
+      "owningSide": "target"
     }
   ]
 }
 
-Reglas:
-- Incluye SIEMPRE un atributo PK 'id' (long, required) en cada entidad.
-- Entidades en PascalCase; atributos en camelCase.
-- Si ves N–N, puedes sugerir una entidad puente.
-- Si dudas, owningSide="target".
+**Reglas importantes:**
+1. SIEMPRE incluye un atributo "id" (type: "long", pk: true, required: true) en CADA entidad
+2. Nombres de entidades en PascalCase (ej: "Cliente", "Pedido", "Producto")
+3. Nombres de atributos en camelCase (ej: "nombreCompleto", "fechaNacimiento")
+4. Tipos válidos: "string", "int", "long", "double", "boolean", "date", "datetime", "email", "password"
+5. Cardinalidades válidas: "ONE" o "MANY"
+6. owningSide válido: "source" o "target" (usa "target" por defecto)
+7. Si encuentras N:M, crea una entidad intermedia
+8. Infiere atributos relevantes según el contexto (ej: Cliente → nombre, email; Producto → nombre, precio)
+
+**Ejemplos:**
+- "Un Cliente tiene muchos Pedidos" → Cliente (ONE) → Pedido (MANY)
+- "Muchos Estudiantes tienen muchos Cursos" → Crear entidad "Inscripcion" intermedia
+- "Una Casa pertenece a un Condominio" → Casa (MANY) → Condominio (ONE)
 `.trim();
 
-    // En v1.20 la forma correcta es models.generateContent
+    // Llamada a Gemini AI
     const result = await gemini.models.generateContent({
       model: modelName,
-      contents: `${system}\n\nDescripción:\n${prompt}`,
-      // NOTA: si TypeScript protesta por alguna propiedad del config, puedes
-      // quitarla o castear el objeto a any.
+      contents: `${system}\n\n**Descripción del usuario:**\n${prompt}\n\n**Genera el JSON:**`,
       config: {
         temperature: 0.2,
         responseMimeType: "application/json",
@@ -53,20 +71,65 @@ Reglas:
 
     const text = extractTextV120(result);
 
-    let json: unknown;
-    try {
-      json = JSON.parse(text);
-    } catch {
+    if (!text || text.trim().length === 0) {
+      console.error("❌ La IA devolvió respuesta vacía");
       return NextResponse.json(
-        { error: "La IA no devolvió JSON válido", raw: text },
+        { error: "La IA no generó ninguna respuesta. Intenta reformular tu descripción." },
         { status: 502 }
       );
     }
 
+    console.log("✅ Respuesta de la IA recibida:", text.substring(0, 200) + "...");
+
+    // Parsear JSON
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (parseError) {
+      console.error("❌ Error al parsear JSON:", parseError);
+      console.error("Texto recibido:", text);
+      return NextResponse.json(
+        { 
+          error: "La IA no devolvió JSON válido. Intenta ser más específico en tu descripción.", 
+          raw: text.substring(0, 500) 
+        },
+        { status: 502 }
+      );
+    }
+
+    // Validar estructura básica
+    const data = json as any;
+    if (!data.entities || !Array.isArray(data.entities)) {
+      console.error("❌ JSON no contiene 'entities' válido:", json);
+      return NextResponse.json(
+        { error: "El JSON generado no tiene el formato esperado (falta 'entities')" },
+        { status: 502 }
+      );
+    }
+
+    console.log(`✅ Diagrama generado: ${data.entities.length} entidades, ${data.relations?.length || 0} relaciones`);
+
     return NextResponse.json(json);
   } catch (err: any) {
+    console.error("❌ Error en /api/ai/nl-to-erd:", err);
+    
+    // Manejar errores específicos de Gemini
+    if (err?.message?.includes("API key")) {
+      return NextResponse.json(
+        { error: "Error de autenticación con Gemini AI. Verifica tu GEMINI_API_KEY." },
+        { status: 500 }
+      );
+    }
+    
+    if (err?.message?.includes("quota") || err?.message?.includes("limit")) {
+      return NextResponse.json(
+        { error: "Se excedió el límite de uso de la API de Gemini. Intenta más tarde." },
+        { status: 429 }
+      );
+    }
+
     return NextResponse.json(
-      { error: err?.message ?? "Error interno" },
+      { error: err?.message ?? "Error interno del servidor" },
       { status: 500 }
     );
   }

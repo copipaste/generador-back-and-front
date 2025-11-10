@@ -318,7 +318,11 @@ public class DemoApplication {
       for (const a of attrs) {
         if (a.pk) continue;
         const j = toJavaType(a.type ?? "String");
-        const n = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+        // Normalizar nombre de campo a camelCase (primera letra minúscula)
+        const rawName = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+        const n = rawName.charAt(0).toLowerCase() + rawName.slice(1);
+        const columnName = toColumnName(a.name || "field");
+        fields += `  @Column(name = "${columnName}")\n`;
         fields += `  ${fieldVisibility} ${j} ${n};\n`;
       }
 
@@ -374,20 +378,23 @@ public class DemoApplication {
         let cascadeForOneToOne = "";
 
         if (relation.relationType === "composition") {
-          // Composición: CASCADE ALL con orphanRemoval (solo en OneToMany/OneToOne)
+          // Composición: La relación es unidireccional en cuanto a eliminación
+          // - Lado "TODO" (OneToMany): CASCADE ALL + orphanRemoval
+          // - Lado "PARTE" (ManyToOne): SOLO PERSIST/MERGE (sin REMOVE)
+          // Esto evita que eliminar una "parte" elimine el "todo"
           cascadeForOneToMany = "cascade = CascadeType.ALL, orphanRemoval = true";
           cascadeForOneToOne = "cascade = CascadeType.ALL, orphanRemoval = true";
-          cascadeForManyToOne = "cascade = CascadeType.ALL"; // No orphanRemoval
+          cascadeForManyToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
         } else if (relation.relationType === "aggregation") {
-          // Agregación: CASCADE limitado
+          // Agregación: CASCADE limitado en ambos lados
           cascadeForOneToMany = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
           cascadeForOneToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
           cascadeForManyToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
         } else {
-          // Asociación, Realización, Dependencia: sin cascade automático
-          cascadeForOneToMany = "";
-          cascadeForOneToOne = "";
-          cascadeForManyToOne = "";
+          // Asociación, Realización, Dependencia: CASCADE limitado
+          cascadeForOneToMany = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
+          cascadeForOneToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
+          cascadeForManyToOne = "cascade = {CascadeType.PERSIST, CascadeType.MERGE}";
         }
 
         if (isManyToMany) {
@@ -488,10 +495,14 @@ public class DemoApplication {
         { name: idName, type: idTypeJava },
         ...attrs
           .filter((a) => !a.pk)
-          .map((a) => ({
-            name: (a.name || "field").replace(/[^A-Za-z0-9_]/g, ""),
-            type: toJavaType(a.type || "String"),
-          })),
+          .map((a) => {
+            const rawName = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+            const normalizedName = rawName.charAt(0).toLowerCase() + rawName.slice(1);
+            return {
+              name: normalizedName,
+              type: toJavaType(a.type || "String"),
+            };
+          }),
       ]
         .map(({ name, type }) => {
           const N = capitalize(name);
@@ -533,8 +544,10 @@ ${relationAccessors.length ? "\n" + relationAccessors.join("\n") : ""}
           const parentAttrs = (parentEntity.attributes || []) as Attr[];
           for (const a of parentAttrs) {
             if (a.pk) continue; // No incluir ID del padre (se hereda)
+            const rawName = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+            const normalizedName = rawName.charAt(0).toLowerCase() + rawName.slice(1);
             dtoFieldsList.push({
-              name: (a.name || "field").replace(/[^A-Za-z0-9_]/g, ""),
+              name: normalizedName,
               type: toJavaType(a.type || "String")
             });
           }
@@ -544,8 +557,10 @@ ${relationAccessors.length ? "\n" + relationAccessors.join("\n") : ""}
       // Agregar campos propios de la entidad
       for (const a of attrs) {
         if (a.pk) continue;
+        const rawName = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+        const normalizedName = rawName.charAt(0).toLowerCase() + rawName.slice(1);
         dtoFieldsList.push({
-          name: (a.name || "field").replace(/[^A-Za-z0-9_]/g, ""),
+          name: normalizedName,
           type: toJavaType(a.type || "String")
         });
       }

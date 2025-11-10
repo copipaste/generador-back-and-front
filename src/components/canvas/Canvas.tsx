@@ -39,10 +39,13 @@ import { User } from "@prisma/client";
 import { useSpringBootGenerator } from "../spring-generator/useSpringBootGenerator";
 import { usePostmanCollectionGenerator } from "../spring-generator/usePostmanCollectionGenerator";
 import { usePostgreSQLGenerator } from "../spring-generator/usePostgreSQLGenerator";
+import { useFlutterGenerator } from "../spring-generator/useFlutterGenerator";
 
 // dentro del bloque de botones de la barra superior en Canvas.tsx
 import  useNlToErd  from "../ai/useNlToErd"; // 👈 importa el hook (ajusta ruta si difiere)
 import NlToErdModal from "~/components/ai/NlToErdModal";
+import ImageToErdModal from "~/components/ai/ImageToErdModal";
+import { AudioToErdModal } from "~/components/ai/AudioToErdModal";
 import ProjectConfigModal from "../settings/ProjectConfigModal";
 
 
@@ -121,6 +124,7 @@ export default function Canvas({
   const generateSpringBoot = useSpringBootGenerator(roomName);
   const generatePostman = usePostmanCollectionGenerator(roomName);
   const generatePostgreSQL = usePostgreSQLGenerator(roomName);
+  const generateFlutter = useFlutterGenerator(roomName);
   const { fromDescription } = useNlToErd(); 
 
 
@@ -669,19 +673,38 @@ const isLinkingState = (s: CanvasState): s is LinkingState =>
           <div className="h-8 w-px bg-gray-300"></div>
 
           {/* Grupo: AI */}
-          <NlToErdModal
-            defaultValue="Una Persona tiene muchas Casas y cada Casa pertenece a un Condominio"
-            trigger={
-              <button
-                type="button"
-                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:from-purple-700 hover:to-pink-700 hover:shadow-md active:scale-95"
-                title="Describe tu diagrama en lenguaje natural"
-              >
-                <span className="text-base">✨</span>
-                Generar con IA
-              </button>
-            }
-          />
+          <div className="flex items-center gap-2">
+            <NlToErdModal
+              defaultValue="Una Persona tiene muchas Casas y cada Casa pertenece a un Condominio"
+              trigger={
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:from-purple-700 hover:to-pink-700 hover:shadow-md active:scale-95"
+                  title="Describe tu diagrama en lenguaje natural"
+                >
+                  <span className="text-base">✨</span>
+                  Generar con IA
+                </button>
+              }
+            />
+
+            <ImageToErdModal
+              trigger={
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:from-blue-700 hover:to-cyan-700 hover:shadow-md active:scale-95"
+                  title="Subir imagen de diagrama dibujado"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  Subir Imagen
+                </button>
+              }
+            />
+
+            <AudioToErdModal />
+          </div>
 
           {/* Separador */}
           <div className="h-8 w-px bg-gray-300"></div>
@@ -719,6 +742,17 @@ const isLinkingState = (s: CanvasState): s is LinkingState =>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
               </svg>
               PostgreSQL
+            </button>
+
+            <button
+              onClick={generateFlutter}
+              className="flex items-center gap-2 rounded-lg bg-sky-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-sky-600 hover:shadow-md active:scale-95"
+              title="Generar aplicación Flutter"
+            >
+              <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M14.314 0L2.3 12 6 15.7 21.684.013h-7.357zm.014 11.072L7.857 17.53l6.47 6.47H21.7l-6.46-6.468 6.46-6.46h-7.37z"/>
+              </svg>
+              Flutter
             </button>
           </div>
 

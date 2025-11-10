@@ -43,7 +43,7 @@ const SelectionBox = memo(
           height={bounds.height}
         />
         <rect
-          className="fill-[#ob99ff]"
+          className="fill-[#0b99ff]"
           x={bounds.x + bounds.width / 2 - (textWidth + padding) / 2}
           y={bounds.y + bounds.height + 10}
           width={textWidth + padding}

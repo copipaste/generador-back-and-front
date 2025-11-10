@@ -17,6 +17,7 @@ export const env = createEnv({
       .default("development"),
     LIVEBLOCKS_PUBLIC_KEY: z.string(),
     LIVEBLOCKS_SECRET_KEY: z.string(),
+    GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY es requerida para la funcionalidad de IA"),
   },
 
   /**
@@ -38,6 +39,7 @@ export const env = createEnv({
     NODE_ENV: process.env.NODE_ENV,
     LIVEBLOCKS_PUBLIC_KEY: process.env.LIVEBLOCKS_PUBLIC_KEY,
     LIVEBLOCKS_SECRET_KEY: process.env.LIVEBLOCKS_SECRET_KEY,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

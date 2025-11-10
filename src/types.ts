@@ -112,6 +112,7 @@ export type ProjectConfig = {
   flutterEnabled: boolean;
   flutterVersion?: string;      // 3.16.0
   flutterPackageName?: string;  // com.ejemplo.proyecto_app
+  flutterBaseUrl?: string;      // http://localhost:8080/api
 };
 
 

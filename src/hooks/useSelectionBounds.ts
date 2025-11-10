@@ -1,8 +1,13 @@
 import { shallow, useSelf, useStorage } from "@liveblocks/react";
-import { Layer, XYWH } from "~/types";
+import { Layer, XYWH, LayerType, EntityLayer } from "~/types";
 
 function boundingBox(layers: Layer[]): XYWH | null {
-  const first = layers[0];
+  // Filtrar solo entidades (que tienen x, y, width, height)
+  const entities = layers.filter(
+    (layer): layer is EntityLayer => layer.type === LayerType.Entity
+  );
+
+  const first = entities[0];
   if (!first) return null;
 
   let left = first.x;
@@ -10,8 +15,8 @@ function boundingBox(layers: Layer[]): XYWH | null {
   let top = first.y;
   let bottom = first.y + first.height;
 
-  for (let i = 1; i < layers.length; i++) {
-    const { x, y, width, height } = layers[i]!;
+  for (let i = 1; i < entities.length; i++) {
+    const { x, y, width, height } = entities[i]!;
     if (left > x) {
       left = x;
     }

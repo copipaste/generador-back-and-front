@@ -123,7 +123,8 @@ export function usePostmanCollectionGenerator(projectName: string) {
           const parentAttrs = (parentEntity.attributes || []) as Attr[];
           for (const a of parentAttrs) {
             if (a.pk) continue; // No incluir ID del padre
-            const field = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+            const rawField = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+            const field = rawField.charAt(0).toLowerCase() + rawField.slice(1);
             bodyExample[field] = sampleForType(field, a.type || "string");
           }
         }
@@ -132,7 +133,8 @@ export function usePostmanCollectionGenerator(projectName: string) {
       // Agregar campos propios
       for (const a of attrs) {
         if (a.pk) continue;
-        const field = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+        const rawField = (a.name || "field").replace(/[^A-Za-z0-9_]/g, "");
+        const field = rawField.charAt(0).toLowerCase() + rawField.slice(1);
         bodyExample[field] = sampleForType(field, a.type || "string");
       }
 
