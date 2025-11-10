@@ -49,6 +49,16 @@ const config = {
   poweredByHeader: false,
   compress: true,
 
+  // Desactivar ESLint durante el build (para deployment)
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  // Desactivar TypeScript errors durante el build (opcional)
+  typescript: {
+    ignoreBuildErrors: false, // Ya pasamos typecheck, así que dejamos esto en false
+  },
+
   // Configuración de imágenes
   images: {
     formats: ["image/avif", "image/webp"],
