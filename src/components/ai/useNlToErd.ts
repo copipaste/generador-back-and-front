@@ -186,6 +186,7 @@ export default  function useNlToErd() {
           type: LayerType.Relation,
           sourceId,
           targetId,
+          relationType: "association", // Tipo de relación por defecto
           sourceCard: r.sourceCard === "MANY" ? "MANY" : "ONE",
           targetCard: r.targetCard === "MANY" ? "MANY" : "ONE",
           owningSide: r.owningSide === "source" ? "source" : "target",
