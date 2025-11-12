@@ -47,7 +47,7 @@ import NlToErdModal from "~/components/ai/NlToErdModal";
 import ImageToErdModal from "~/components/ai/ImageToErdModal";
 import { AudioToErdModal } from "~/components/ai/AudioToErdModal";
 import ProjectConfigModal from "../settings/ProjectConfigModal";
-
+import ChatAssistant from "../chat/ChatAssistant";
 
 import { useClassDiagramToFormsGenerator } from "~/hooks/useClassDiagramToFormsGenerator";
 
@@ -861,6 +861,9 @@ const isLinkingState = (s: CanvasState): s is LinkingState =>
         leftIsMinimized={leftIsMinimized}
         setLeftIsMinimized={setLeftIsMinimized}
       />
+
+      {/* Asistente de Chat con IA */}
+      <ChatAssistant />
     </div>
   );
 }
